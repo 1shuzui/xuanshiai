@@ -82,6 +82,18 @@ class RealNameRequest(BaseModel):
                                r"(0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]$")
 
 
+class NicknameUpdateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    nickname: str = Field(min_length=1, max_length=64, description="用户昵称，去除首尾空格后为 1 至 64 字符")
+
+
+class NicknameUpdateResponse(BaseModel):
+    user_id: int
+    nickname: str
+    updated_at: datetime
+
+
 class ProfileUpdateRequest(BaseModel):
     gender: Literal[1, 2] | None = None
     birthday: date | None = None

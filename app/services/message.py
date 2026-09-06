@@ -1,6 +1,7 @@
 """Ordinary-user message centre adapters built on the existing social services."""
 
 from __future__ import annotations
+from collections.abc import Awaitable, Callable
 
 import re
 from datetime import UTC, datetime
@@ -245,7 +246,8 @@ async def get_application_page(
 
 
 async def handle_application(
-    db: AsyncSession, user_id: int, application_id: int, action: str, client_command_id: str
+    db: AsyncSession, user_id: int, application_id: int, action: str, client_command_id: str,
+    *, before_mutation: Callable[[], Awaitable[None]] | None = None,
 ) -> ApplicationHandleResult:
     payload = {"applicationId": application_id, "action": action}
     reservation = await reserve_or_replay(
@@ -255,9 +257,11 @@ async def handle_application(
         client_command_id,
         payload,
     )
-    if reservation.response is not None:
-        return ApplicationHandleResult.model_validate(reservation.response)
     try:
+        if before_mutation is not None:
+            await before_mutation()
+        if reservation.response is not None:
+            return ApplicationHandleResult.model_validate(reservation.response)
         updated = await discovery.respond_application(
             db,
             user_id,
@@ -301,7 +305,8 @@ async def get_chat_messages(
 
 
 async def send_chat_message(
-    db: AsyncSession, user_id: int, request: MessageSendRequest
+    db: AsyncSession, user_id: int, request: MessageSendRequest,
+    *, before_mutation: Callable[[], Awaitable[None]] | None = None,
 ) -> MessageSendResult:
     permission = await get_chat_permission(db, user_id, request.user_id)
     if not permission.can_chat or permission.session_id is None:
@@ -319,9 +324,14 @@ async def send_chat_message(
         request.client_message_id,
         payload,
     )
-    if reservation.response is not None:
-        return MessageSendResult.model_validate(reservation.response)
     try:
+        if before_mutation is not None:
+            await before_mutation()
+            permission = await get_chat_permission(db, user_id, request.user_id)
+            if not permission.can_chat or permission.session_id is None:
+                raise HTTPException(403, detail=permission.reason)
+        if reservation.response is not None:
+            return MessageSendResult.model_validate(reservation.response).model_copy(update={"deduplicated": True})
         media_url: str | None = None
         if request.type != "text":
             media = await resolve_owned_ready_media(
@@ -377,6 +387,7 @@ async def revoke_chat_message(
     user_id: int,
     message_id: int,
     client_command_id: str,
+    *, before_mutation: Callable[[], Awaitable[None]] | None = None,
 ) -> MessageRevokeResult:
     payload = {"messageId": message_id}
     reservation = await reserve_or_replay(
@@ -386,9 +397,11 @@ async def revoke_chat_message(
         client_command_id,
         payload,
     )
-    if reservation.response is not None:
-        return MessageRevokeResult.model_validate(reservation.response)
     try:
+        if before_mutation is not None:
+            await before_mutation()
+        if reservation.response is not None:
+            return MessageRevokeResult.model_validate(reservation.response)
         await social.revoke_message(db, user_id, message_id)
         result = MessageRevokeResult(message_id=message_id)
         await complete(db, reservation, _model_payload(result))

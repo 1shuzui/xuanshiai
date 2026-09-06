@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -34,6 +35,7 @@ from app.schemas.message import (
     MbtiResultCopy,
 )
 from app.services.profile import recalculate_completion
+from app.data import mbti_copy_v2
 
 
 DISCLAIMER = "结果仅用于自我了解，不构成心理诊断或专业建议。"
@@ -99,8 +101,30 @@ def _answers(value: Any) -> list[dict[str, Any]]:
     return parsed
 
 
+def _scoring_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """Read a frozen session, including the immutable archive for legacy lists."""
+    raw = _json(row["question_snapshot"], "题目快照")
+    if isinstance(raw, list):
+        if (row["definition_id"], row["definition_version"], row["result_copy_version"]) != (
+            mbti_copy_v2.DEFINITION_ID, mbti_copy_v2.DEFINITION_VERSION, mbti_copy_v2.RESULT_COPY_VERSION
+        ):
+            raise HTTPException(409, detail="该历史测试版本暂不可用，请放弃后重新开始")
+        return {"questions": raw, "dimensionPoles": deepcopy(mbti_copy_v2.DIMENSION_POLES),
+                "resultCopy": {"version": mbti_copy_v2.RESULT_COPY_VERSION,
+                               "summaries": deepcopy(mbti_copy_v2.RESULT_SUMMARIES),
+                               "disclaimer": mbti_copy_v2.DISCLAIMER}}
+    if not isinstance(raw, dict) or not isinstance(raw.get("questions"), list):
+        raise HTTPException(500, detail="题目快照数据损坏")
+    copy = raw.get("resultCopy", {})
+    if copy.get("version") != row["result_copy_version"] or not isinstance(copy.get("summaries"), dict):
+        raise HTTPException(500, detail="结果文案快照数据损坏")
+    if raw.get("dimensionPoles") != {key: list(value) for key, value in mbti_copy_v2.DIMENSION_POLES.items()}:
+        raise HTTPException(500, detail="计分维度快照数据损坏")
+    return raw
+
+
 def _snapshot(row: dict[str, Any]) -> EmotionSessionSnapshot:
-    questions = _json(row["question_snapshot"], "题目快照")
+    questions = _scoring_snapshot(row)["questions"]
     answers = _answers(row.get("answers"))
     result_raw = _json(row.get("result_json"), "结果") if row.get("result_json") else None
     return EmotionSessionSnapshot(
@@ -169,6 +193,8 @@ async def start_assessment(
 ) -> EmotionSessionSnapshot:
     if request.assessment_id != DEFINITION_ID:
         raise HTTPException(404, detail="测试定义不存在")
+    # Lock a stable row even when this user has no draft yet.
+    await db.execute(text("SELECT id FROM users WHERE id = :user_id FOR UPDATE"), {"user_id": user_id})
     existing = await db.execute(
         text(
             """SELECT id FROM user_mbti_assessment_session
@@ -196,7 +222,11 @@ async def start_assessment(
             "definition_id": DEFINITION_ID,
             "definition_version": DEFINITION_VERSION,
             "result_copy_version": RESULT_COPY_VERSION,
-            "question_snapshot": json.dumps(questions, ensure_ascii=False),
+            "question_snapshot": json.dumps({
+                "questions": questions, "dimensionPoles": DIMENSION_POLES,
+                "resultCopy": {"version": RESULT_COPY_VERSION, "summaries": RESULT_SUMMARIES,
+                               "disclaimer": DISCLAIMER},
+            }, ensure_ascii=False),
         },
     )
     await db.commit()
@@ -262,11 +292,20 @@ def _score(
     session_id: str,
     questions: list[dict[str, Any]],
     answers: list[dict[str, Any]],
+    definition_id: str = mbti_copy_v2.DEFINITION_ID,
+    definition_version: str = mbti_copy_v2.DEFINITION_VERSION,
+    scoring_snapshot: dict[str, Any] | None = None,
 ) -> MbtiResult:
+    frozen = scoring_snapshot or {"dimensionPoles": mbti_copy_v2.DIMENSION_POLES,
+        "resultCopy": {"version": mbti_copy_v2.RESULT_COPY_VERSION,
+                       "summaries": mbti_copy_v2.RESULT_SUMMARIES, "disclaimer": mbti_copy_v2.DISCLAIMER}}
     answer_by_id = {str(answer["questionId"]): int(answer["value"]) for answer in answers}
     dimensions: dict[str, dict[str, int]] = {}
     type_letters: list[str] = []
-    for dimension, (first_pole, second_pole) in DIMENSION_POLES.items():
+    # MySQL normalizes JSON object keys; MBTI letter order is part of the
+    # assessment contract and cannot depend on storage dictionary ordering.
+    for dimension in ("EI", "SN", "TF", "JP"):
+        first_pole, second_pole = frozen["dimensionPoles"][dimension]
         relevant = [question for question in questions if question.get("dimension") == dimension]
         if not relevant:
             raise HTTPException(500, detail="题目快照缺少 MBTI 维度")
@@ -277,9 +316,12 @@ def _score(
             scale_min = int(question["scaleMin"])
             scale_max = int(question["scaleMax"])
             span = scale_max - scale_min
+            if span <= 0 or int(question["direction"]) not in (-1, 1):
+                raise HTTPException(500, detail="题目计分快照数据损坏")
             first_raw += value - scale_min if int(question["direction"]) == 1 else scale_max - value
             possible += span
-        first_score = round(first_raw / possible * 100)
+        # Positive integer half-up, identical to frontend Math.round without float drift.
+        first_score = (first_raw * 200 + possible) // (2 * possible)
         dimensions[dimension] = {first_pole: first_score, second_pole: 100 - first_score}
         type_letters.append(first_pole if first_score >= 50 else second_pole)
     mbti_type = "".join(type_letters)
@@ -287,15 +329,15 @@ def _score(
     return MbtiResult(
         id=f"mbti-result:{session_id}",
         session_id=session_id,
-        assessment_id=DEFINITION_ID,
-        assessment_version=DEFINITION_VERSION,
+        assessment_id=definition_id,
+        assessment_version=definition_version,
         mbti_type=mbti_type,
         dimensions=dimensions,
         result_copy=MbtiResultCopy(
-            version=RESULT_COPY_VERSION,
+            version=frozen["resultCopy"]["version"],
             title=f"{mbti_type} · MBTI 偏好结果",
-            summary=RESULT_SUMMARIES[mbti_type],
-            disclaimer=DISCLAIMER,
+            summary=frozen["resultCopy"]["summaries"][mbti_type],
+            disclaimer=frozen["resultCopy"]["disclaimer"],
         ),
         completed_at=completed_at,
     )
@@ -309,7 +351,7 @@ async def save_answers(
         raise HTTPException(409, detail="测试已经提交")
     if row["status"] == "discarded":
         raise HTTPException(409, detail="测试会话已放弃")
-    questions = _json(row["question_snapshot"], "题目快照")
+    questions = _scoring_snapshot(row)["questions"]
     incoming = _canonical_answers(questions, request.answers)
     existing = _answers(row.get("answers"))
     merged = {str(answer["questionId"]): int(answer["value"]) for answer in existing}
@@ -337,7 +379,8 @@ async def submit_assessment(
     db: AsyncSession, user_id: int, session_id: str, request: EmotionAnswersUpdate
 ) -> EmotionSessionSnapshot:
     row = await _owned_session(db, user_id, session_id)
-    questions = _json(row["question_snapshot"], "题目快照")
+    frozen = _scoring_snapshot(row)
+    questions = frozen["questions"]
     submitted = _canonical_answers(questions, request.answers)
     if len(submitted) != len(questions):
         raise HTTPException(422, detail="必须完成全部题目后提交")
@@ -348,7 +391,9 @@ async def submit_assessment(
         raise HTTPException(409, detail="已完成测试不能更改答案")
     if row["status"] == "discarded":
         raise HTTPException(409, detail="测试会话已放弃")
-    result = _score(session_id=session_id, questions=questions, answers=submitted)
+    result = _score(session_id=session_id, questions=questions, answers=submitted,
+                    definition_id=row["definition_id"], definition_version=row["definition_version"],
+                    scoring_snapshot=frozen)
     result_data = result.model_dump(by_alias=True, mode="json")
     await db.execute(
         text(
@@ -385,7 +430,7 @@ async def submit_assessment(
             "jp_score": result.dimensions["JP"]["J"],
             "dimensions": json.dumps(result.dimensions),
             "description": result.result_copy.summary,
-            "test_version": DEFINITION_VERSION,
+            "test_version": result.assessment_version,
         },
     )
     await db.commit()
@@ -423,6 +468,7 @@ async def set_profile_source(
 ) -> EmotionProfileSource:
     if not request.confirmed:
         raise HTTPException(422, detail="同步资料前需要明确确认")
+    await db.execute(text("SELECT id FROM users WHERE id = :user_id FOR UPDATE"), {"user_id": user_id})
     assessment_version: str | None = None
     result_id: str | None = None
     if request.source == "assessment":

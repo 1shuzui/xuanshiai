@@ -1,0 +1,2791 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Parent API",
+    "version": "2026-09-06"
+  },
+  "paths": {
+    "/api/v1/parent/context": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "当前父母身份及有效子女授权",
+        "operationId": "context_api_v1_parent_context_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentContext"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/invitations": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母生成有效期24小时的邀请",
+        "operationId": "invite_api_v1_parent_invitations_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentInvitation"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/invitations/preview": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "子女预览邀请方与授权范围",
+        "operationId": "preview_api_v1_parent_invitations_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentConsentCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentConsentPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/invitations/accept": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "成年子女明确确认授权",
+        "operationId": "accept_api_v1_parent_invitations_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentConsentAccept"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentRelationship"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/relationships": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "本人关联的父母授权记录",
+        "operationId": "relationships_api_v1_parent_relationships_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentRelationshipPage"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/relationships/{parent_id}": {
+      "delete": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母或子女撤销授权",
+        "operationId": "revoke_api_v1_parent_relationships__parent_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "parent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Parent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentSuccess"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/preferences": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母提醒与本人照片许可",
+        "operationId": "preferences_api_v1_parent_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentPreference"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "修改父母提醒或本人照片许可",
+        "operationId": "set_preferences_api_v1_parent_preferences_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentPreferenceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentPreference"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/parent/children/{child_id}": {
+      "put": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "代子女完善允许编辑的资料",
+        "operationId": "update_child_api_v1_parent_children__child_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentChildUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentChild"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/candidates": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "子女主体推荐及喜欢列表",
+        "operationId": "candidates_api_v1_parent_children__child_id__candidates_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "liked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Liked"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentCandidatePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/candidates/{target_id}": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "隐私保护的父母候选详情",
+        "operationId": "detail_api_v1_parent_children__child_id__candidates__target_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Target Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentCandidate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/likes/{target_id}": {
+      "put": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "设置子女主体的私密喜欢状态",
+        "operationId": "like_api_v1_parent_children__child_id__likes__target_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Target Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentLikeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentLikeResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/applications/{target_id}": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "代子女发出幂等认识申请",
+        "operationId": "apply_api_v1_parent_children__child_id__applications__target_id__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Target Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentApplyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentApplyResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/blocks/{target_id}": {
+      "put": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "屏蔽子女主体候选",
+        "operationId": "block_api_v1_parent_children__child_id__blocks__target_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Target Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentSuccess"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/reports/{target_id}": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母实名主体提交安全举报",
+        "operationId": "report_api_v1_parent_children__child_id__reports__target_id__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Target Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParentReportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/list": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母查看已获同意的子女会话",
+        "operationId": "conversations_api_v1_parent_children__child_id__message_list_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 9,
+              "default": "",
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageConversationPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/applications": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母查看子女申请分页",
+        "operationId": "applications_api_v1_parent_children__child_id__message_applications_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(incoming|outgoing)$",
+              "default": "incoming",
+              "title": "Direction"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 9,
+              "default": "",
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageApplicationPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/chat/permission": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母聊天前核验双方同意",
+        "operationId": "permission_api_v1_parent_children__child_id__message_chat_permission_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Userid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPermissionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/chat": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母读取脱敏聊天记录",
+        "operationId": "chat_api_v1_parent_children__child_id__message_chat_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Userid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MessageChatItem"
+                  },
+                  "title": "Response Chat Api V1 Parent Children  Child Id  Message Chat Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/send": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母发送已获授权的文字消息",
+        "operationId": "send_api_v1_parent_children__child_id__message_send_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageSendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSendResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/application/handle": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母处理子女收到的申请",
+        "operationId": "handle_api_v1_parent_children__child_id__message_application_handle_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationHandleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationHandleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/read-all": {
+      "post": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母标记子女会话已读",
+        "operationId": "read_all_api_v1_parent_children__child_id__message_read_all_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllReadResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/message/messages/{message_id}": {
+      "delete": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "父母撤回授权主体发出的消息",
+        "operationId": "revoke_message_api_v1_parent_children__child_id__message_messages__message_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "clientCommandId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "title": "Clientcommandid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageRevokeResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/parent/children/{child_id}/alerts": {
+      "get": {
+        "tags": [
+          "父母授权"
+        ],
+        "summary": "有效授权下的页内提醒摘要",
+        "operationId": "alerts_api_v1_parent_children__child_id__alerts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "child_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Child Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParentAlerts"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ParentContext": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "资源标识；context 为 parent:父母用户ID，其余资源为数据库整数ID"
+          },
+          "mode": {
+            "type": "string",
+            "const": "parent",
+            "title": "Mode",
+            "description": "父母上下文固定为parent",
+            "default": "parent"
+          },
+          "dataMode": {
+            "type": "string",
+            "const": "http",
+            "title": "Datamode",
+            "description": "本服务固定http；Mock仅供显式测试模式",
+            "default": "http"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/ParentIdentity",
+            "description": "当前Token对应父母身份"
+          },
+          "child": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParentChild"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前绑定子女及授权状态；未绑定时为null，失效时不下发子女私密资料"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/ParentQuota",
+            "description": "子女主体的每日申请额度"
+          },
+          "releaseGate": {
+            "$ref": "#/components/schemas/ParentReleaseGate",
+            "description": "后端能力声明"
+          },
+          "messageNotifications": {
+            "type": "boolean",
+            "title": "Messagenotifications",
+            "description": "父母页内申请与消息提醒开关；不代表操作系统或微信订阅推送",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "parent",
+          "quota"
+        ],
+        "title": "ParentContext"
+      },
+      "ParentIdentity": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "资源标识；context 为 parent:父母用户ID，其余资源为数据库整数ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "当前账号显示名称"
+          },
+          "avatar": {
+            "type": "string",
+            "title": "Avatar",
+            "description": "父母视图固定空字符串，不下发原始头像",
+            "default": ""
+          },
+          "realNameStatus": {
+            "type": "string",
+            "enum": [
+              "missing",
+              "reviewing",
+              "passed",
+              "rejected"
+            ],
+            "title": "Realnamestatus",
+            "description": "实名状态：missing 未提交、reviewing 审核中、passed 通过、rejected 未通过"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "realNameStatus"
+        ],
+        "title": "ParentIdentity"
+      },
+      "ParentChild": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "资源标识；context 为 parent:父母用户ID，其余资源为数据库整数ID"
+          },
+          "displayName": {
+            "type": "string",
+            "title": "Displayname",
+            "description": "子女或候选的显示称呼"
+          },
+          "birthYear": {
+            "type": "integer",
+            "title": "Birthyear",
+            "description": "已实名认证的出生年份；父母编辑必须与已核验年份完全一致；资料无权访问时为0"
+          },
+          "city": {
+            "type": "string",
+            "title": "City",
+            "description": "城市显示名称；编辑时支持唯一城市名称、去市后缀名称或行政编码"
+          },
+          "job": {
+            "type": "string",
+            "title": "Job",
+            "description": "职业；未公开时返回未公开，编辑时可为空"
+          },
+          "introduction": {
+            "type": "string",
+            "title": "Introduction",
+            "description": "已获准展示的自我介绍"
+          },
+          "authorizationStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "granted",
+              "revoked",
+              "expired"
+            ],
+            "title": "Authorizationstatus",
+            "description": "pending 待授权、granted 当前有效、revoked 已撤销或资格失效、expired 超期"
+          },
+          "authorizationExpiresAt": {
+            "type": "string",
+            "title": "Authorizationexpiresat",
+            "description": "授权到期 UTC ISO 8601 时间；未授予时为空字符串"
+          },
+          "profileProgress": {
+            "type": "number",
+            "title": "Profileprogress",
+            "description": "现有资料完整度分数，范围0至100"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "displayName",
+          "birthYear",
+          "city",
+          "job",
+          "introduction",
+          "authorizationStatus",
+          "authorizationExpiresAt",
+          "profileProgress"
+        ],
+        "title": "ParentChild"
+      },
+      "ParentQuota": {
+        "properties": {
+          "dailyTotal": {
+            "type": "integer",
+            "title": "Dailytotal",
+            "description": "父母协助每日申请总额，固定3次，按UTC日期重置",
+            "default": 3
+          },
+          "remainingApplications": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remainingapplications",
+            "description": "现有子女主体今日剩余次数；包含子女本人发起的申请，不得在客户端猜测扣减"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "remainingApplications"
+        ],
+        "title": "ParentQuota"
+      },
+      "ParentReleaseGate": {
+        "properties": {
+          "productionReady": {
+            "type": "boolean",
+            "title": "Productionready",
+            "description": "服务具备关系校验及脱敏能力；不表示当前环境已部署或已通过发布验收",
+            "default": true
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "邀请操作为保密随机邀请码；releaseGate 为服务能力代码；仅服务器存储邀请哈希",
+            "default": "OK"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "服务状态说明或申请附言，取决于对应模型",
+            "default": "服务端逐次校验授权并过滤隐私字段"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ParentReleaseGate"
+      },
+      "ParentInvitation": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "邀请操作为保密随机邀请码；releaseGate 为服务能力代码；仅服务器存储邀请哈希"
+          },
+          "expiresAt": {
+            "type": "string",
+            "title": "Expiresat",
+            "description": "邀请或授权到期UTC ISO 8601时间；未生成时可为空字符串"
+          },
+          "consentVersion": {
+            "type": "string",
+            "title": "Consentversion",
+            "description": "明确授权政策版本parent-consent@1；未知版本拒绝授予或代理操作"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "expiresAt",
+          "consentVersion"
+        ],
+        "title": "ParentInvitation"
+      },
+      "ParentConsentCode": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Code",
+            "description": "邀请操作为保密随机邀请码；releaseGate 为服务能力代码；仅服务器存储邀请哈希"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "ParentConsentCode"
+      },
+      "ParentConsentPreview": {
+        "properties": {
+          "parentId": {
+            "type": "integer",
+            "title": "Parentid",
+            "description": "关系所属父母的用户ID；不得冒用其他账号"
+          },
+          "parentName": {
+            "type": "string",
+            "title": "Parentname",
+            "description": "被授权父母的显示名称"
+          },
+          "consentVersion": {
+            "type": "string",
+            "title": "Consentversion",
+            "description": "明确授权政策版本parent-consent@1；未知版本拒绝授予或代理操作"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes",
+            "description": "子女确认前必须逐项展示的五项授权范围"
+          },
+          "expiresAt": {
+            "type": "string",
+            "title": "Expiresat",
+            "description": "邀请或授权到期UTC ISO 8601时间；未生成时可为空字符串"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parentId",
+          "parentName",
+          "consentVersion",
+          "scopes",
+          "expiresAt"
+        ],
+        "title": "ParentConsentPreview"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ParentConsentAccept": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 32,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Code",
+            "description": "邀请操作为保密随机邀请码；releaseGate 为服务能力代码；仅服务器存储邀请哈希"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "const": true,
+            "title": "Confirmed",
+            "description": "子女明确确认；只接受JSON布尔true，拒绝false、1和字符串"
+          },
+          "consentVersion": {
+            "type": "string",
+            "const": "parent-consent@1",
+            "title": "Consentversion",
+            "description": "明确授权政策版本parent-consent@1；未知版本拒绝授予或代理操作",
+            "default": "parent-consent@1"
+          },
+          "days": {
+            "type": "integer",
+            "maximum": 90.0,
+            "minimum": 1.0,
+            "title": "Days",
+            "description": "子女确认的授权有效天数，整数1至90，默认30",
+            "default": 30
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "confirmed"
+        ],
+        "title": "ParentConsentAccept"
+      },
+      "ParentRelationship": {
+        "properties": {
+          "parentId": {
+            "type": "integer",
+            "title": "Parentid",
+            "description": "关系所属父母的用户ID；不得冒用其他账号"
+          },
+          "parentName": {
+            "type": "string",
+            "title": "Parentname",
+            "description": "被授权父母的显示名称"
+          },
+          "childId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Childid",
+            "description": "绑定子女用户ID；尚未绑定时null"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "granted",
+              "revoked",
+              "expired"
+            ],
+            "title": "Status",
+            "description": "授权状态：pending待授权、granted有效、revoked已撤销、expired已过期"
+          },
+          "expiresAt": {
+            "type": "string",
+            "title": "Expiresat",
+            "description": "邀请或授权到期UTC ISO 8601时间；未生成时可为空字符串"
+          },
+          "consentVersion": {
+            "type": "string",
+            "title": "Consentversion",
+            "description": "明确授权政策版本parent-consent@1；未知版本拒绝授予或代理操作"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parentId",
+          "parentName",
+          "childId",
+          "status",
+          "expiresAt",
+          "consentVersion"
+        ],
+        "title": "ParentRelationship"
+      },
+      "ParentRelationshipPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ParentRelationship"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页资源数组；无结果为[]，元素结构按引用模型展开"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ParentRelationshipPage"
+      },
+      "ParentSuccess": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "业务操作成功，固定true；失败使用HTTP错误状态",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ParentSuccess"
+      },
+      "ParentPreference": {
+        "properties": {
+          "messageNotifications": {
+            "type": "boolean",
+            "title": "Messagenotifications",
+            "description": "父母页内申请与消息提醒开关；不代表操作系统或微信订阅推送",
+            "default": true
+          },
+          "allowParentPhoto": {
+            "type": "boolean",
+            "title": "Allowparentphoto",
+            "description": "当前账号本人许可父母视图看清晰照片；默认关闭，仅详情可使用，列表和聊天始终脱敏",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ParentPreference"
+      },
+      "ParentPreferenceUpdate": {
+        "properties": {
+          "messageNotifications": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messagenotifications",
+            "description": "父母页内申请与消息提醒开关；不代表操作系统或微信订阅推送"
+          },
+          "allowParentPhoto": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowparentphoto",
+            "description": "当前账号本人许可父母视图看清晰照片；默认关闭，仅详情可使用，列表和聊天始终脱敏"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ParentPreferenceUpdate"
+      },
+      "ParentChildUpdate": {
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Displayname",
+            "description": "子女或候选的显示称呼"
+          },
+          "birthYear": {
+            "type": "integer",
+            "minimum": 1940.0,
+            "title": "Birthyear",
+            "description": "已实名认证的出生年份；父母编辑必须与已核验年份完全一致；资料无权访问时为0"
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "City",
+            "description": "城市显示名称；编辑时支持唯一城市名称、去市后缀名称或行政编码"
+          },
+          "job": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Job",
+            "description": "职业；未公开时返回未公开，编辑时可为空",
+            "default": ""
+          },
+          "introduction": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Introduction",
+            "description": "已获准展示的自我介绍",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "displayName",
+          "birthYear",
+          "city"
+        ],
+        "title": "ParentChildUpdate"
+      },
+      "ParentCandidatePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ParentCandidate"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "本页资源数组；无结果为[]，元素结构按引用模型展开"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "当前页，从1开始"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize",
+            "description": "每页条数，默认20，父母候选最多20"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "满足可见性条件的总条数"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "title": "Hasmore",
+            "description": "是否还有下一页"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total",
+          "hasMore"
+        ],
+        "title": "ParentCandidatePage"
+      },
+      "ParentCandidate": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "资源标识；context 为 parent:父母用户ID，其余资源为数据库整数ID"
+          },
+          "displayName": {
+            "type": "string",
+            "title": "Displayname",
+            "description": "子女或候选的显示称呼"
+          },
+          "genderText": {
+            "type": "string",
+            "title": "Gendertext",
+            "description": "男、女或未公开"
+          },
+          "birthYear": {
+            "type": "integer",
+            "title": "Birthyear",
+            "description": "已实名认证的出生年份；父母编辑必须与已核验年份完全一致；资料无权访问时为0"
+          },
+          "city": {
+            "type": "string",
+            "title": "City",
+            "description": "城市显示名称；编辑时支持唯一城市名称、去市后缀名称或行政编码"
+          },
+          "height": {
+            "type": "string",
+            "title": "Height",
+            "description": "带cm单位的身高显示值；受隐私限制时为未公开"
+          },
+          "education": {
+            "type": "string",
+            "title": "Education",
+            "description": "学历显示名称；遵循数据库学历编码及本人隐私设置"
+          },
+          "job": {
+            "type": "string",
+            "title": "Job",
+            "description": "职业；未公开时返回未公开，编辑时可为空"
+          },
+          "income": {
+            "type": "string",
+            "title": "Income",
+            "description": "父母视图当前固定未公开",
+            "default": "未公开"
+          },
+          "certificationText": {
+            "type": "string",
+            "title": "Certificationtext",
+            "description": "根据真实认证信息生成的展示标签"
+          },
+          "avatar": {
+            "type": "string",
+            "title": "Avatar",
+            "description": "父母视图固定空字符串，不下发原始头像",
+            "default": ""
+          },
+          "clearAvatar": {
+            "type": "string",
+            "title": "Clearavatar",
+            "description": "仅候选本人许可且详情可见时下发清晰头像URL，其他情形为空",
+            "default": ""
+          },
+          "introduction": {
+            "type": "string",
+            "title": "Introduction",
+            "description": "已获准展示的自我介绍",
+            "default": ""
+          },
+          "datingNotes": {
+            "type": "string",
+            "title": "Datingnotes",
+            "description": "认识与沟通边界说明",
+            "default": "是否继续由双方本人决定。"
+          },
+          "expectations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expectations",
+            "description": "公开期待列表，未提供时[]"
+          },
+          "liked": {
+            "type": "boolean",
+            "title": "Liked",
+            "description": "该候选在子女主体下的私密喜欢状态；不通知对方",
+            "default": false
+          },
+          "canViewClearPhoto": {
+            "type": "boolean",
+            "title": "Canviewclearphoto",
+            "description": "当前详情是否获准下发清晰照片；列表始终false",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "displayName",
+          "genderText",
+          "birthYear",
+          "city",
+          "height",
+          "education",
+          "job",
+          "certificationText"
+        ],
+        "title": "ParentCandidate"
+      },
+      "ParentLikeRequest": {
+        "properties": {
+          "liked": {
+            "type": "boolean",
+            "title": "Liked",
+            "description": "该候选在子女主体下的私密喜欢状态；不通知对方"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "liked"
+        ],
+        "title": "ParentLikeRequest"
+      },
+      "ParentLikeResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "业务操作成功，固定true；失败使用HTTP错误状态",
+            "default": true
+          },
+          "userId": {
+            "type": "integer",
+            "title": "Userid",
+            "description": "目标候选用户ID"
+          },
+          "liked": {
+            "type": "boolean",
+            "title": "Liked",
+            "description": "该候选在子女主体下的私密喜欢状态；不通知对方"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "userId",
+          "liked"
+        ],
+        "title": "ParentLikeResult"
+      },
+      "ParentApplyRequest": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Note",
+            "description": "认识申请附言，去首尾空白后不可为空；相同待回应申请的重试必须相同"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "note"
+        ],
+        "title": "ParentApplyRequest"
+      },
+      "ParentApplyResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "description": "业务操作成功，固定true；失败使用HTTP错误状态",
+            "default": true
+          },
+          "applicationId": {
+            "type": "integer",
+            "title": "Applicationid",
+            "description": "现有match_apply申请记录ID"
+          },
+          "applyStatus": {
+            "type": "string",
+            "const": "pending",
+            "title": "Applystatus",
+            "description": "发出认识申请后固定pending，聊天仍需对方接受",
+            "default": "pending"
+          },
+          "remainingApplications": {
+            "type": "integer",
+            "title": "Remainingapplications",
+            "description": "现有子女主体今日剩余次数；包含子女本人发起的申请，不得在客户端猜测扣减"
+          },
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "description": "是否复用已有同内容待回应申请",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "applicationId",
+          "remainingApplications"
+        ],
+        "title": "ParentApplyResult"
+      },
+      "ParentReportRequest": {
+        "properties": {
+          "reasonId": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reasonid",
+            "description": "举报原因，复用现有安全举报类型；other表示其他"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Detail",
+            "description": "举报补充描述，可为空",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reasonId"
+        ],
+        "title": "ParentReportRequest"
+      },
+      "ReportResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "target_user_id": {
+            "type": "integer",
+            "title": "Target User Id"
+          },
+          "target_type": {
+            "type": "string",
+            "enum": [
+              "user",
+              "post",
+              "comment",
+              "paper_plane"
+            ],
+            "title": "Target Type",
+            "default": "user"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "status": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_user_id",
+          "type",
+          "status",
+          "created_at"
+        ],
+        "title": "ReportResponse"
+      },
+      "MessageConversationPage": {
+        "properties": {
+          "list": {
+            "items": {
+              "$ref": "#/components/schemas/MessageConversation"
+            },
+            "type": "array",
+            "title": "List"
+          },
+          "nextCursor": {
+            "type": "string",
+            "title": "Nextcursor"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "title": "Hasmore"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "unreadTotal": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unreadtotal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "list",
+          "nextCursor",
+          "hasMore",
+          "total",
+          "unreadTotal"
+        ],
+        "title": "MessageConversationPage"
+      },
+      "MessageConversation": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "conversationId": {
+            "type": "string",
+            "title": "Conversationid"
+          },
+          "userId": {
+            "type": "integer",
+            "title": "Userid"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "lastMessage": {
+            "type": "string",
+            "title": "Lastmessage"
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unreadcount"
+          },
+          "online": {
+            "type": "boolean",
+            "title": "Online",
+            "default": false
+          },
+          "messageType": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "voice",
+              "video"
+            ],
+            "title": "Messagetype",
+            "default": "text"
+          },
+          "type": {
+            "type": "string",
+            "const": "chat",
+            "title": "Type",
+            "default": "chat"
+          },
+          "matched": {
+            "type": "boolean",
+            "title": "Matched",
+            "default": true
+          },
+          "canChat": {
+            "type": "boolean",
+            "title": "Canchat",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "conversationId",
+          "userId",
+          "avatar",
+          "name",
+          "lastMessage",
+          "time",
+          "unreadCount"
+        ],
+        "title": "MessageConversation"
+      },
+      "MessageApplicationPage": {
+        "properties": {
+          "list": {
+            "items": {
+              "$ref": "#/components/schemas/MessageApplication"
+            },
+            "type": "array",
+            "title": "List"
+          },
+          "nextCursor": {
+            "type": "string",
+            "title": "Nextcursor"
+          },
+          "hasMore": {
+            "type": "boolean",
+            "title": "Hasmore"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "pendingCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pendingcount",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "list",
+          "nextCursor",
+          "hasMore",
+          "total"
+        ],
+        "title": "MessageApplicationPage"
+      },
+      "MessageApplication": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "userId": {
+            "type": "integer",
+            "title": "Userid"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted",
+              "rejected",
+              "expired"
+            ],
+            "title": "Status"
+          },
+          "statusText": {
+            "type": "string",
+            "title": "Statustext"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ],
+            "title": "Direction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "avatar",
+          "name",
+          "message",
+          "time",
+          "status",
+          "statusText",
+          "direction"
+        ],
+        "title": "MessageApplication"
+      },
+      "ChatPermissionResponse": {
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "title": "Userid"
+          },
+          "conversationId": {
+            "type": "string",
+            "title": "Conversationid",
+            "default": ""
+          },
+          "sessionId": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionid"
+          },
+          "canChat": {
+            "type": "boolean",
+            "title": "Canchat"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userId",
+          "canChat",
+          "reason"
+        ],
+        "title": "ChatPermissionResponse"
+      },
+      "MessageChatItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "clientMessageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clientmessageid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "voice",
+              "video"
+            ],
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time"
+          },
+          "isMine": {
+            "type": "boolean",
+            "title": "Ismine"
+          },
+          "senderAvatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Senderavatar"
+          },
+          "revoked": {
+            "type": "boolean",
+            "title": "Revoked",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "content",
+          "time",
+          "isMine"
+        ],
+        "title": "MessageChatItem"
+      },
+      "MessageSendRequest": {
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Userid"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Content",
+            "default": ""
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "voice",
+              "video"
+            ],
+            "title": "Type",
+            "default": "text"
+          },
+          "clientMessageId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Clientmessageid"
+          },
+          "mediaId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mediaid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userId",
+          "clientMessageId"
+        ],
+        "title": "MessageSendRequest"
+      },
+      "MessageSendResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "messageId": {
+            "type": "integer",
+            "title": "Messageid"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageChatItem"
+          },
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "messageId",
+          "message"
+        ],
+        "title": "MessageSendResult"
+      },
+      "ApplicationHandleRequest": {
+        "properties": {
+          "applicationId": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Applicationid"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "reject"
+            ],
+            "title": "Action"
+          },
+          "clientCommandId": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Clientcommandid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "applicationId",
+          "action",
+          "clientCommandId"
+        ],
+        "title": "ApplicationHandleRequest"
+      },
+      "ApplicationHandleResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "application": {
+            "$ref": "#/components/schemas/MessageApplication"
+          },
+          "canChat": {
+            "type": "boolean",
+            "title": "Canchat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "application",
+          "canChat"
+        ],
+        "title": "ApplicationHandleResult"
+      },
+      "MarkAllReadResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "updatedCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Updatedcount"
+          },
+          "unreadTotal": {
+            "type": "integer",
+            "const": 0,
+            "title": "Unreadtotal",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "updatedCount"
+        ],
+        "title": "MarkAllReadResult"
+      },
+      "MessageRevokeResult": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success",
+            "default": true
+          },
+          "messageId": {
+            "type": "integer",
+            "title": "Messageid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messageId"
+        ],
+        "title": "MessageRevokeResult"
+      },
+      "ParentAlerts": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "页内提醒当前是否开启"
+          },
+          "latestEventId": {
+            "type": "integer",
+            "title": "Latesteventid",
+            "description": "当前子女申请与消息提醒事件最大ID，仅作变化标记；无事件为0",
+            "default": 0
+          },
+          "unreadCount": {
+            "type": "integer",
+            "title": "Unreadcount",
+            "description": "当前可见会话未读总数",
+            "default": 0
+          },
+          "pendingCount": {
+            "type": "integer",
+            "title": "Pendingcount",
+            "description": "子女收到的待回应申请数量",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "ParentAlerts"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

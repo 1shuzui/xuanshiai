@@ -27,6 +27,7 @@ from app.schemas.auth import (
     CompletionItemResponse,
     CompletionResponse,
     IntroTemplateResponse,
+    NicknameUpdateResponse,
     PhotoOrderRequest,
     PreferenceUpdateRequest,
     ProfilePreviewResponse,
@@ -252,8 +253,28 @@ async def get_profile(db: AsyncSession, user_id: int, public: bool = False) -> d
     return data
 
 
+async def update_nickname(db: AsyncSession, user_id: int, nickname: str) -> NicknameUpdateResponse:
+    await db.execute(
+        text("UPDATE users SET nickname = :nickname, updated_at = UTC_TIMESTAMP() WHERE id = :user_id"),
+        {"user_id": user_id, "nickname": nickname},
+    )
+    row = (await db.execute(
+        text("SELECT id AS user_id, nickname, updated_at FROM users WHERE id = :user_id"),
+        {"user_id": user_id},
+    )).mappings().one()
+    result = NicknameUpdateResponse(**row)
+    await db.commit()
+    return result
+
+
 async def update_profile(db: AsyncSession, user_id: int, request: ProfileUpdateRequest) -> dict[str, Any]:
     values = request.model_dump(exclude_unset=True)
+    if "mbti" in values:
+        # Legacy clients may echo the existing value, but all changes require explicit provenance.
+        await db.execute(text("SELECT id FROM users WHERE id = :user_id FOR UPDATE"), {"user_id": user_id})
+        current = await db.execute(text("SELECT mbti FROM user_profile WHERE user_id = :user_id"), {"user_id": user_id})
+        if values.pop("mbti") != current.scalar():
+            raise HTTPException(422, detail="请通过情感实验室确认 MBTI 类型及来源后同步资料")
     if "birthday" in values and values["birthday"] and _calculate_age(values["birthday"]) < 18:
         raise HTTPException(422, detail="用户必须年满18周岁")
     if "gender" in values:

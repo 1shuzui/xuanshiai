@@ -469,6 +469,10 @@ async def _target_rows(db: AsyncSession, viewer_id: int, target_ids: list[int]) 
     }
     result = await db.execute(
         text(CARD_SELECT + f""" WHERE u.id IN ({placeholders}) AND u.status = 1
+                 AND COALESCE(pr.show_profile, 1) = 1
+                 AND NOT EXISTS (SELECT 1 FROM user_block bl
+                     WHERE (bl.user_id = :viewer_id AND bl.target_user_id = u.id)
+                        OR (bl.user_id = u.id AND bl.target_user_id = :viewer_id))
                  AND COALESCE(pr.who_can_see_me, 1) <> 4
                  AND COALESCE(pr.match_status, 1) = 1
                  AND NOT EXISTS (SELECT 1 FROM user_media pending_media
@@ -696,8 +700,12 @@ async def create_application(db: AsyncSession, viewer_id: int, target_id: int, r
 async def list_applications(db: AsyncSession, viewer_id: int, incoming: bool, page: int, page_size: int) -> ApplicationPage:
     await _expire_pending_applications(db)
     field = "to_user_id" if incoming else "from_user_id"
-    total = int((await db.execute(text(f"SELECT COUNT(*) FROM match_apply WHERE {field} = :user_id"), {"user_id": viewer_id})).scalar() or 0)
-    result = await db.execute(text(f"SELECT id, from_user_id, to_user_id, message, status, expire_at, created_at FROM match_apply WHERE {field} = :user_id ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"), {"user_id": viewer_id, "limit": page_size, "offset": (page - 1) * page_size})
+    peer = "from_user_id" if incoming else "to_user_id"
+    visible = f""" AND NOT EXISTS (SELECT 1 FROM user_block b
+        WHERE (b.user_id = :user_id AND b.target_user_id = match_apply.{peer})
+           OR (b.user_id = match_apply.{peer} AND b.target_user_id = :user_id))"""
+    total = int((await db.execute(text(f"SELECT COUNT(*) FROM match_apply WHERE {field} = :user_id" + visible), {"user_id": viewer_id})).scalar() or 0)
+    result = await db.execute(text(f"SELECT id, from_user_id, to_user_id, message, status, expire_at, created_at FROM match_apply WHERE {field} = :user_id" + visible + " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"), {"user_id": viewer_id, "limit": page_size, "offset": (page - 1) * page_size})
     items = [ApplicationResponse(**row) for row in result.mappings().all()]
     return ApplicationPage(items=items, page=page, page_size=page_size, total=total, has_more=page * page_size < total)
 
@@ -710,6 +718,7 @@ async def respond_application(db: AsyncSession, viewer_id: int, application_id: 
         raise HTTPException(404, detail="认识申请不存在")
     if row["status"] != 0:
         raise HTTPException(409, detail="当前申请已处理")
+    await _ensure_target(db, viewer_id, int(row["from_user_id"]))
     status = 1 if accepted else 2
     await db.execute(text("UPDATE match_apply SET status = :status, responded_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = :id"), {"status": status, "id": application_id})
     if accepted:

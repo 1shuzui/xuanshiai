@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.schemas.auth import (
     CompletionResponse,
     IntroTemplateResponse,
+    NicknameUpdateRequest,
+    NicknameUpdateResponse,
     PhotoOrderRequest,
     PreferenceResponse,
     PreferenceUpdateRequest,
@@ -28,6 +30,7 @@ from app.services.profile import (
     set_primary_photo,
     update_preferences,
     update_profile,
+    update_nickname,
     upload_avatar,
     upload_background,
     upload_photo,
@@ -53,6 +56,12 @@ async def profile(current: CurrentUser = Depends(get_current_user), db: AsyncSes
 async def edit_profile(body: ProfileUpdateRequest, current: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     """更新当前用户资料并重新计算资料完整度。"""
     return await update_profile(db, current.id, body)
+
+
+@router.patch("/nickname", response_model=NicknameUpdateResponse, summary="修改本人昵称")
+async def edit_nickname(body: NicknameUpdateRequest, current: CurrentUser = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)) -> NicknameUpdateResponse:
+    return await update_nickname(db, current.id, body.nickname)
 
 
 @router.get("/completion", response_model=CompletionResponse, summary="查询资料完整度")

@@ -262,3 +262,7 @@ logs/        本地日志目录
 使用 Codex 或 Claude Code 修改代码前，必须先阅读项目根目录的 `AGENTS.md` 或 `CLAUDE.md`，并遵守其中引用的 `PROJECT_RULES.md`。
 
 规则正文预留在 `PROJECT_RULES.md`，由项目负责人持续补充。
+
+## 父母端与MBTI专项验证
+
+实际实现、增量迁移、可重复独立MySQL测试与回退说明见[parent-emotion-repair.md](parent-emotion-repair.md)。所有尚待环境处理的事项见[待完成事项.md](待完成事项.md)。父母接口文档可用`python scripts/export_parent_api_docs.py`从实际路由重新生成。

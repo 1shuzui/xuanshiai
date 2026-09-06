@@ -1,7 +1,7 @@
 """Ordinary-user message centre endpoints.
 
-Parent/child acting-subject semantics deliberately do not exist here. They require
-their own relationship, consent and audit model and remain outside this release.
+Parent delegation uses the separate /parent routes with verified relationships,
+live consent and actor audit records. This router always acts as the logged-in user.
 """
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Path, Query, UploadFile

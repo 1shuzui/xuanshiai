@@ -18,6 +18,7 @@ from app.api.routes import (
     meeting,
     membership,
     organization,
+    parent,
     points,
     presence,
     profile,
@@ -47,6 +48,7 @@ api_router.include_router(matchmaker.requests_router, tags=["红娘"])
 api_router.include_router(meeting.router, tags=["红娘"])
 api_router.include_router(social.router, tags=["消息"])
 api_router.include_router(message.router, tags=["消息"])
+api_router.include_router(parent.router, tags=["父母授权"])
 api_router.include_router(community.router, tags=["社区"])
 api_router.include_router(media.router, tags=["社区"])
 api_router.include_router(admin.router, tags=["管理后台"])
@@ -73,4 +75,5 @@ OPENAPI_TAGS = [
     {"name": "积分", "description": "积分账户和积分流水相关能力。"},
     {"name": "地区", "description": "省市区等地区数据查询。"},
     {"name": "系统", "description": "健康检查和系统发现信息。"},
+    {"name": "父母授权", "description": "本人授权、撤销以及父母协助下的子女业务主体。"},
 ]

@@ -15,66 +15,66 @@ class CamelModel(BaseModel):
 
 class MessageConversation(CamelModel):
     id: int
-    conversation_id: str = Field(serialization_alias="conversationId")
-    user_id: int = Field(serialization_alias="userId")
+    conversation_id: str = Field(alias="conversationId")
+    user_id: int = Field(alias="userId")
     avatar: str | None
     name: str
-    last_message: str = Field(serialization_alias="lastMessage")
+    last_message: str = Field(alias="lastMessage")
     time: int
-    unread_count: int = Field(serialization_alias="unreadCount", ge=0)
+    unread_count: int = Field(alias="unreadCount", ge=0)
     online: bool = False
     message_type: Literal["text", "image", "voice", "video"] = Field(
-        default="text", serialization_alias="messageType"
+        default="text", alias="messageType"
     )
     type: Literal["chat"] = "chat"
     matched: bool = True
-    can_chat: bool = Field(default=True, serialization_alias="canChat")
+    can_chat: bool = Field(default=True, alias="canChat")
 
 
 class MessageConversationPage(CamelModel):
     list: list[MessageConversation]
-    next_cursor: str = Field(serialization_alias="nextCursor")
-    has_more: bool = Field(serialization_alias="hasMore")
+    next_cursor: str = Field(alias="nextCursor")
+    has_more: bool = Field(alias="hasMore")
     total: int = Field(ge=0)
-    unread_total: int = Field(serialization_alias="unreadTotal", ge=0)
+    unread_total: int = Field(alias="unreadTotal", ge=0)
 
 
 class MessageApplication(CamelModel):
     id: int
-    user_id: int = Field(serialization_alias="userId")
+    user_id: int = Field(alias="userId")
     avatar: str | None
     name: str
     message: str
     time: int
     status: Literal["pending", "accepted", "rejected", "expired"]
-    status_text: str = Field(serialization_alias="statusText")
+    status_text: str = Field(alias="statusText")
     direction: Literal["in", "out"]
 
 
 class MessageApplicationPage(CamelModel):
     list: list[MessageApplication]
-    next_cursor: str = Field(serialization_alias="nextCursor")
-    has_more: bool = Field(serialization_alias="hasMore")
+    next_cursor: str = Field(alias="nextCursor")
+    has_more: bool = Field(alias="hasMore")
     total: int = Field(ge=0)
-    pending_count: int = Field(default=0, serialization_alias="pendingCount", ge=0)
+    pending_count: int = Field(default=0, alias="pendingCount", ge=0)
 
 
 class ChatPermissionResponse(CamelModel):
-    user_id: int = Field(serialization_alias="userId")
-    conversation_id: str = Field(default="", serialization_alias="conversationId")
-    session_id: int | None = Field(default=None, serialization_alias="sessionId")
-    can_chat: bool = Field(serialization_alias="canChat")
+    user_id: int = Field(alias="userId")
+    conversation_id: str = Field(default="", alias="conversationId")
+    session_id: int | None = Field(default=None, alias="sessionId")
+    can_chat: bool = Field(alias="canChat")
     reason: str
 
 
 class MessageChatItem(CamelModel):
     id: int
-    client_message_id: str | None = Field(default=None, serialization_alias="clientMessageId")
+    client_message_id: str | None = Field(default=None, alias="clientMessageId")
     type: Literal["text", "image", "voice", "video"]
     content: str
     time: int
-    is_mine: bool = Field(serialization_alias="isMine")
-    sender_avatar: str | None = Field(default=None, serialization_alias="senderAvatar")
+    is_mine: bool = Field(alias="isMine")
+    sender_avatar: str | None = Field(default=None, alias="senderAvatar")
     revoked: bool = False
 
 
@@ -103,14 +103,14 @@ class MessageSendRequest(CamelModel):
 
 class MessageSendResult(CamelModel):
     success: Literal[True] = True
-    message_id: int = Field(serialization_alias="messageId")
+    message_id: int = Field(alias="messageId")
     message: MessageChatItem
     deduplicated: bool = False
 
 
 class MessageRevokeResult(CamelModel):
     success: Literal[True] = True
-    message_id: int = Field(serialization_alias="messageId")
+    message_id: int = Field(alias="messageId")
 
 
 class ApplicationHandleRequest(CamelModel):
@@ -122,13 +122,13 @@ class ApplicationHandleRequest(CamelModel):
 class ApplicationHandleResult(CamelModel):
     success: Literal[True] = True
     application: MessageApplication
-    can_chat: bool = Field(serialization_alias="canChat")
+    can_chat: bool = Field(alias="canChat")
 
 
 class MarkAllReadResult(CamelModel):
     success: Literal[True] = True
-    updated_count: int = Field(serialization_alias="updatedCount", ge=0)
-    unread_total: Literal[0] = Field(default=0, serialization_alias="unreadTotal")
+    updated_count: int = Field(alias="updatedCount", ge=0)
+    unread_total: Literal[0] = Field(default=0, alias="unreadTotal")
 
 
 class ContactExchangeCreateRequest(CamelModel):
@@ -159,13 +159,13 @@ class ContactExchangeRespondRequest(CamelModel):
 
 class ContactExchange(CamelModel):
     id: int
-    user_id: int = Field(serialization_alias="userId")
-    contact_type: Literal["phone", "wechat"] = Field(serialization_alias="contactType")
+    user_id: int = Field(alias="userId")
+    contact_type: Literal["phone", "wechat"] = Field(alias="contactType")
     status: Literal["pending", "accepted", "rejected"]
-    requested_by_me: bool = Field(serialization_alias="requestedByMe")
-    contact_value: str | None = Field(default=None, serialization_alias="contactValue")
-    created_at: int = Field(serialization_alias="createdAt")
-    responded_at: int | None = Field(default=None, serialization_alias="respondedAt")
+    requested_by_me: bool = Field(alias="requestedByMe")
+    contact_value: str | None = Field(default=None, alias="contactValue")
+    created_at: int = Field(alias="createdAt")
+    responded_at: int | None = Field(default=None, alias="respondedAt")
 
 
 class ContactExchangePage(CamelModel):
@@ -178,12 +178,12 @@ class EmotionAssessmentDefinition(CamelModel):
     kind: Literal["mbti"] = "mbti"
     title: str
     authorization: dict[str, str | int | None]
-    can_start: bool = Field(serialization_alias="canStart")
-    question_count: int = Field(serialization_alias="questionCount", ge=0)
+    can_start: bool = Field(alias="canStart")
+    question_count: int = Field(alias="questionCount", ge=0)
     scale: dict[str, int]
     dimensions: list[str]
-    tie_break: Literal["first_pole"] = Field(serialization_alias="tieBreak")
-    result_copy_version: str = Field(serialization_alias="resultCopyVersion")
+    tie_break: Literal["first_pole"] = Field(alias="tieBreak")
+    result_copy_version: str = Field(alias="resultCopyVersion")
 
 
 class EmotionQuestionOption(CamelModel):
@@ -211,49 +211,49 @@ class MbtiResultCopy(CamelModel):
 
 class MbtiResult(CamelModel):
     id: str
-    session_id: str = Field(serialization_alias="sessionId")
-    assessment_id: str = Field(serialization_alias="assessmentId")
-    assessment_version: str = Field(serialization_alias="assessmentVersion")
+    session_id: str = Field(alias="sessionId")
+    assessment_id: str = Field(alias="assessmentId")
+    assessment_version: str = Field(alias="assessmentVersion")
     source: Literal["assessment"] = "assessment"
-    mbti_type: MbtiType = Field(serialization_alias="mbtiType")
+    mbti_type: MbtiType = Field(alias="mbtiType")
     dimensions: dict[str, dict[str, int]]
-    result_copy: MbtiResultCopy = Field(serialization_alias="resultCopy")
-    completed_at: int = Field(serialization_alias="completedAt")
+    result_copy: MbtiResultCopy = Field(alias="resultCopy")
+    completed_at: int = Field(alias="completedAt")
 
 
 class EmotionSessionSnapshot(CamelModel):
-    schema_version: Literal[2] = Field(serialization_alias="schemaVersion")
+    schema_version: Literal[2] = Field(alias="schemaVersion")
     id: str
-    definition_id: str = Field(serialization_alias="definitionId")
-    definition_version: str = Field(serialization_alias="definitionVersion")
-    result_copy_version: str = Field(serialization_alias="resultCopyVersion")
+    definition_id: str = Field(alias="definitionId")
+    definition_version: str = Field(alias="definitionVersion")
+    result_copy_version: str = Field(alias="resultCopyVersion")
     kind: Literal["mbti"] = "mbti"
     status: Literal["in_progress", "completed", "discarded"]
-    question_ids: list[str] = Field(serialization_alias="questionIds")
+    question_ids: list[str] = Field(alias="questionIds")
     questions: list[EmotionQuestionSnapshot]
     answers: list[MbtiAnswer]
     result: MbtiResult | None = None
-    created_at: int = Field(serialization_alias="createdAt")
-    updated_at: int = Field(serialization_alias="updatedAt")
+    created_at: int = Field(alias="createdAt")
+    updated_at: int = Field(alias="updatedAt")
 
 
 class EmotionProfileSource(CamelModel):
-    mbti_type: MbtiType = Field(serialization_alias="mbtiType")
+    mbti_type: MbtiType = Field(alias="mbtiType")
     source: Literal["assessment", "self_reported"]
-    assessment_version: str | None = Field(default=None, serialization_alias="assessmentVersion")
-    result_id: str | None = Field(default=None, serialization_alias="resultId")
-    confirmed_at: int = Field(serialization_alias="confirmedAt")
+    assessment_version: str | None = Field(default=None, alias="assessmentVersion")
+    result_id: str | None = Field(default=None, alias="resultId")
+    confirmed_at: int = Field(alias="confirmedAt")
 
 
 class EmotionLabSummary(CamelModel):
     assessments: list[EmotionAssessmentDefinition]
-    manual_types: list[MbtiType] = Field(serialization_alias="manualTypes")
+    manual_types: list[MbtiType] = Field(alias="manualTypes")
     active_session: EmotionSessionSnapshot | None = Field(
-        default=None, serialization_alias="activeSession"
+        default=None, alias="activeSession"
     )
-    profile_source: EmotionProfileSource | None = Field(default=None, serialization_alias="profileSource")
+    profile_source: EmotionProfileSource | None = Field(default=None, alias="profileSource")
     disclaimer: str
-    disclaimer_version: str = Field(serialization_alias="disclaimerVersion")
+    disclaimer_version: str = Field(alias="disclaimerVersion")
 
 
 class EmotionProfileSourceUpdate(CamelModel):

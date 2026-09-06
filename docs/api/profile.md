@@ -10,6 +10,38 @@ Authorization: Bearer <access_token>
 
 JSON 接口使用 `Content-Type: application/json`；上传接口使用 `multipart/form-data`。
 
+## 本人昵称更新（2026-09-06 新增）
+
+`PATCH /api/v1/users/me/nickname` 用于资料页单独保存昵称。需要登录，用户 ID 由 Bearer Token 决定，无路径或查询参数，也不需要请求幂等键。
+
+| 请求字段 | 位置 | 类型 | 必填 | 约束与含义 | 示例 |
+| --- | --- | --- | --- | --- | --- |
+| nickname | JSON body | string | 是 | 去除首尾空白后 1–64 字符，无默认值；不接受其他字段 | `认真生活` |
+
+```http
+PATCH /api/v1/users/me/nickname
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{"nickname":"认真生活"}
+```
+
+成功返回 HTTP 200，全部字段必返且不可为空：
+
+| 响应字段 | JSON 类型 | 含义 |
+| --- | --- | --- |
+| user_id | integer | 当前登录用户 ID |
+| nickname | string | 实际保存的昵称，已移除首尾空白 |
+| updated_at | string | 数据库记录的更新时间，ISO 8601 格式，UTC |
+
+```json
+{"user_id":202,"nickname":"认真生活","updated_at":"2026-09-06T07:00:00"}
+```
+
+HTTP 401 表示登录已失效，前端需要重新登录，例如 `{"detail":"登录已过期，请重新登录"}`。HTTP 422 表示请求校验失败，如昵称 `"   "`、超过 64 字符、非字符串或额外提交 `user_id`；响应沿用 FastAPI 的 `detail` 错误数组，例如 `{"detail":[{"type":"string_too_short","loc":["body","nickname"],"msg":"String should have at least 1 character","input":""}]}`。前端保留输入并展示错误；网络失败可以重试。
+
+重复提交同一昵称保持相同值，并发提交以数据库最终提交的值为准，不扣额度。接口只修改本人昵称与更新时间，MBTI 及其确认来源保持原值。本次为兼容新增，旧的个人资料接口路径与响应保持不变；新资料页调用该接口替代缺失的昵称保存实现。
+
 ## 0. 我的页面聚合信息
 
 ### `GET /api/v1/users/me/overview`
@@ -386,3 +418,9 @@ Path 参数 `media_id` 为正整数且必须属于当前用户；成功返回新
 | `415` | 文件格式或真实内容无法识别 |
 | `422` | 字段、标签、MBTI、年龄、时长或排序校验失败 |
 | `503` | ffprobe 未安装或视频处理服务不可用 |
+
+## 2026-09-06 MBTI 写入入口
+
+**变更内容**：PATCH /users/me/profile中的mbti字段保留兼容，但只接受与当前数据库一致的原样回传。不同类型或清空已有类型返回422：`{"detail":"请通过情感实验室确认 MBTI 类型及来源后同步资料"}`。请求的其他字段不会在该拒绝中部分写入。
+
+旧客户端迁移：从普通资料PATCH移除mbti；选择与修改类型调用PUT /api/v1/emotion-lab/profile-source。请求示例`{"mbtiType":"ENFP","source":"self_reported","confirmed":true}`，返回mbtiType/source/assessmentVersion/resultId/confirmedAt；具体来源与错误约束见[情感实验室](emotion_lab.md)。本人完成测试也必须显式确认后才同步资料。

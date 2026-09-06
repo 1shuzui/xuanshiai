@@ -1,6 +1,8 @@
 """一期商业化和组织归属领域的数据库表定义。"""
+from app.db.parent_schema import PARENT_TABLES
 
 BUSINESS_TABLES = {
+    **PARENT_TABLES,
     "organization": """
         CREATE TABLE IF NOT EXISTS `organization` (
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
