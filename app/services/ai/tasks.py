@@ -353,6 +353,7 @@ _TASK_REGISTRY: dict[str, TaskRegistration] = {
     "profile_extract": TaskRegistration(TaskKind.GENERATE, AiFeature.PROFILE),
     "moxiang_candidate_extract": TaskRegistration(TaskKind.GENERATE, AiFeature.PROFILE),
     "profile_narrative": TaskRegistration(TaskKind.GENERATE, AiFeature.PROFILE),
+    "profile_preview": TaskRegistration(TaskKind.GENERATE, AiFeature.PROFILE),
     "profile_card_summarize": TaskRegistration(TaskKind.GENERATE, AiFeature.PROFILE),
     "search_parse": TaskRegistration(TaskKind.GENERATE, AiFeature.SEARCH),
     "search_suggest": TaskRegistration(TaskKind.GENERATE, AiFeature.SEARCH),
@@ -441,17 +442,19 @@ async def _load_current_completion_context(
     if scope:
         consent_result = await db.execute(
             text(
-                "SELECT version, policy_revision, granted_at "
+                "SELECT id AS grant_id, version, policy_revision, granted_at "
                 "FROM ai_consent_grant "
                 "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-                "ORDER BY granted_at DESC LIMIT 1 FOR UPDATE"
+                "ORDER BY id DESC LIMIT 1 FOR UPDATE"
             ),
             {"user_id": task.owner_user_id, "scope": scope},
         )
         current_consent = await _first_row(consent_result)
         consent_matches = current_consent is not None and str(
             current_consent["version"]
-        ) == str(snapshot.get("version") or "")
+        ) == str(snapshot.get("version") or "") and str(
+            current_consent.get("grant_id") or ""
+        ) == str(snapshot.get("grant_id") or "")
         if current_consent is not None and snapshot.get("policy_revision"):
             consent_matches = consent_matches and str(
                 current_consent["policy_revision"]
@@ -796,6 +799,22 @@ async def tombstone_owner_tasks(
     )
 
 
+def _task_revisions_match(task: AiTaskRecord, left: dict, right: dict) -> bool:
+    """新版任务只排除无关主体的变化；隐私、关系和策略版本始终校验。"""
+    keys = {"profile", "preference", "privacy", "relationship", "policy"}
+    payload = task.payload_summary or {}
+    if payload.get("flow_version") != "continuous_v2":
+        return left == right
+    if set(left) != keys or set(right) != keys:
+        return False
+    if task.task_type == "profile_preview" and payload.get("subject") in {"personal", "ideal_partner"}:
+        keys.remove("preference" if payload["subject"] == "personal" else "profile")
+    elif task.task_type == "moxiang_candidate_extract":
+        # 输入仅为有来源的本轮发言，确认任一画像不会改变原始证据。
+        keys -= {"profile", "preference"}
+    return all(left[key] == right[key] for key in keys)
+
+
 async def complete_task(
     db: AsyncSession,
     task_id: str,
@@ -864,16 +883,17 @@ async def complete_task(
         _registration is None or _registration.kind is not TaskKind.GOVERNANCE
     )
     if _revision_gated and task.source_revision_json and (
-        task.source_revision_json != current_revision.as_dict()
+        not _task_revisions_match(task, task.source_revision_json, current_revision.as_dict())
     ):
         return await supersede()
     if (
         _revision_gated
         and revisions is not None
-        and _revision_dict(revisions) != current_revision.as_dict()
+        and not _task_revisions_match(task, _revision_dict(revisions), current_revision.as_dict())
     ):
         return await supersede()
-    if _revision_gated and _revisions_changed(task.source_revision_json, revisions):
+    if (_revision_gated and revisions is not None
+            and not _task_revisions_match(task, task.source_revision_json or {}, _revision_dict(revisions))):
         if task.status is AiTaskStatus.RUNNING:
             return await supersede()
         return await not_applied()

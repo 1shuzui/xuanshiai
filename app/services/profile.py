@@ -26,6 +26,7 @@ from app.core.profile_tags import (
     ALL_TAG_OPTIONS,
     CUSTOM_TAG_CATEGORY_KEY,
     CUSTOM_TAG_CATEGORY_MAP_KEY,
+    display_personal_tags,
     TAG_CATEGORIES,
     TAG_CATALOG_REVISION,
     normalize_custom_tag_categories,
@@ -315,13 +316,14 @@ async def get_profile(db: AsyncSession, user_id: int, public: bool = False) -> d
     raw_tags = _profile_tag_values(data)
     data["custom_tag_categories"] = _profile_custom_tag_categories(data)
     data["custom_tags"] = list(data["custom_tag_categories"])
-    data["personal_tags"] = personal_tags(raw_tags, data["custom_tags"])
+    stored_tags = personal_tags(raw_tags, data["custom_tags"])
+    data["personal_tags"] = display_personal_tags(raw_tags, data["custom_tags"])
     data["legacy_tags"] = []
     data["interest_tags"], data["personality_tags"] = split_personal_tags(raw_tags, data["custom_tags"])
     data["tag_selections"] = {
-        key: [tag for tag in data["personal_tags"] if tag in options]
+        key: [tag for tag in stored_tags if tag in options]
         for key, _, options in TAG_CATEGORIES
-        if any(tag in options for tag in data["personal_tags"])
+        if any(tag in options for tag in stored_tags)
     }
     if data["custom_tags"]:
         data["tag_selections"][CUSTOM_TAG_CATEGORY_KEY] = data["custom_tags"]
@@ -361,7 +363,21 @@ async def get_profile(db: AsyncSession, user_id: int, public: bool = False) -> d
     return data
 
 
-async def update_profile(db: AsyncSession, user_id: int, request: ProfileUpdateRequest) -> dict[str, Any]:
+async def _lock_profile_update(db: AsyncSession, user_id: int) -> None:
+    # 普通资料编辑和草稿采用统一先锁用户，再读资料/锁 revision，避免丢失更新与锁反序。
+    await db.execute(
+        text("SELECT id FROM users WHERE id = :user_id FOR UPDATE"),
+        {"user_id": user_id},
+    )
+
+
+async def update_profile(
+    db: AsyncSession,
+    user_id: int,
+    request: ProfileUpdateRequest,
+    *,
+    commit: bool = True,
+) -> dict[str, Any]:
     values = request.model_dump(exclude_unset=True)
     if "personal_tags" in values:
         selected = values.pop("personal_tags")
@@ -387,6 +403,7 @@ async def update_profile(db: AsyncSession, user_id: int, request: ProfileUpdateR
             raise HTTPException(422, detail="请通过情感实验室确认 MBTI 类型及来源后同步资料")
     if "birthday" in values and values["birthday"] and _calculate_age(values["birthday"]) < 18:
         raise HTTPException(422, detail="用户必须年满18周岁")
+    await _lock_profile_update(db, user_id)
     if "gender" in values:
         result = await db.execute(text("SELECT gender FROM users WHERE id = :id FOR UPDATE"), {"id": user_id})
         old_gender = result.scalar()
@@ -443,7 +460,8 @@ async def update_profile(db: AsyncSession, user_id: int, request: ProfileUpdateR
             "profile_updated",
             50,
         )
-    await db.commit()
+    if commit:
+        await db.commit()
     return await get_profile(db, user_id)
 
 
@@ -477,6 +495,16 @@ async def update_nickname(
 
 
 async def recalculate_completion(db: AsyncSession, user_id: int) -> float:
+    # 锁序统一：先锁 users 行，再写 user_profile_completion。
+    # 「我的」页并行请求 /users/me/completion 与 /users/me/overview（后者内部
+    # 也调用本函数）会各自 UPSERT user_profile_completion 再 UPDATE users；
+    # 与 update_profile 的「先锁 users，再算完整度」形成 AB-BA 环，
+    # MySQL 抛 1213 死锁使资料完整度 500。与 _lock_profile_update 同序后，
+    # 并发写在此等待而非互锁。
+    await db.execute(
+        text("SELECT id FROM users WHERE id = :user_id FOR UPDATE"),
+        {"user_id": user_id},
+    )
     result = await db.execute(
         text("""SELECT u.gender, u.birthday, u.is_married, u.avatar, u.is_single_pledge,
                       COALESCE(ua.realname_status, 0) AS realname_status,

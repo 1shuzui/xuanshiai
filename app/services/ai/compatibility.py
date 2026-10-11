@@ -828,12 +828,12 @@ def _consent_snapshot_for_scope(
     if hasattr(granted_at, "isoformat"):
         granted_at = granted_at.isoformat()
     return {
+        "grant_id": str(consent.get("grant_id") or ""),
         "scope": str(consent.get("scope") or default_scope),
         "version": str(consent.get("version") or ""),
         "policy_revision": str(consent.get("policy_revision") or ""),
         "granted_at": granted_at,
     }
-
 
 def _normalize_consent_pair(consent: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     if not consent:
@@ -862,18 +862,20 @@ def _consent_snapshot_matches(
     if not stored or not current:
         return False
     stored_snapshot = {
+        "grant_id": str(stored.get("grant_id") or ""),
         "scope": str(stored.get("scope") or ""),
         "version": str(stored.get("version") or ""),
         "policy_revision": str(stored.get("policy_revision") or ""),
         "granted_at": str(stored.get("granted_at") or ""),
     }
     current_snapshot = {
+        "grant_id": str(current.get("grant_id") or ""),
         "scope": str(current.get("scope") or ""),
         "version": str(current.get("version") or ""),
         "policy_revision": str(current.get("policy_revision") or ""),
         "granted_at": str(current.get("granted_at") or ""),
     }
-    return stored_snapshot == current_snapshot
+    return bool(stored_snapshot["grant_id"]) and stored_snapshot == current_snapshot
 
 
 async def _pair_consents_current(
@@ -899,10 +901,10 @@ async def _load_active_consent(
 ) -> dict[str, Any] | None:
     result = await db.execute(
         text(
-            "SELECT user_id, scope, version, policy_revision, granted_at "
+            "SELECT id AS grant_id, user_id, scope, version, policy_revision, granted_at "
             "FROM ai_consent_grant "
             "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-            "ORDER BY granted_at DESC LIMIT 1"
+            "ORDER BY id DESC LIMIT 1"
         ),
         {"user_id": user_id, "scope": scope},
     )
@@ -2082,21 +2084,3 @@ async def request_compatibility_llm_refresh(
         expires_at=_now_utc()
         + timedelta(minutes=settings.ai_compatibility_llm_ttl_minutes),
     )
-
-
-def register_compatibility_handlers() -> None:
-    """把 ``compatibility``/``compatibility_llm`` 注册进 AI Worker 的 TASK_HANDLERS。
-
-    模块导入（路由导入本模块）即生效；幂等，可在测试中重复调用。
-    """
-    from app.workers import ai_worker as worker_module
-
-    worker_module.TASK_HANDLERS.setdefault(
-        COMPATIBILITY_TASK_TYPE, compatibility_execute_handler
-    )
-    worker_module.TASK_HANDLERS.setdefault(
-        COMPATIBILITY_LLM_TASK_TYPE, compatibility_llm_execute_handler
-    )
-
-
-register_compatibility_handlers()

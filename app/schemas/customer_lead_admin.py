@@ -149,6 +149,18 @@ class CustomerLeadRestoreRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class CustomerLeadConvertRequest(BaseModel):
+    gender: Literal[1, 2] | None = None
+    remark: str | None = Field(default=None, max_length=500)
+
+
+class CustomerLeadConvertResult(BaseModel):
+    lead: CustomerLead
+    user_id: int
+    review_status: Literal["PENDING"] = "PENDING"
+    replayed: bool = False
+
+
 class CustomerLeadAbandonment(BaseModel):
     id: int
     lead_id: int

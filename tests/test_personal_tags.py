@@ -260,3 +260,39 @@ async def test_completion_threshold_counts_distinct_valid_tags_across_categories
     tag_item = next(item for item in completion.items if item.key == "personal_tags")
     assert tag_item.completed == (count >= 3)
     assert tag_item.weight == 8
+
+
+@pytest.mark.asyncio
+async def test_completion_recalculation_locks_user_row_before_writing():
+    """完整度重算必须先锁 users 行，保证与 update_profile 同序，避免 1213 死锁。
+
+    回归背景：/users/me/completion 与 /users/me/overview 会在「我的」页并行发起，
+    两者都调用本函数；旧实现先 UPSERT user_profile_completion 再 UPDATE users，
+    与 update_profile 的「先锁 users 再算完整度」形成 AB-BA 锁环，实测抛
+    MySQL 1213 使资料完整度 500（前端显示「—」）。
+    """
+
+    fields = ("gender birthday is_married avatar is_single_pledge realname_status occupation "
+              "education_level income height weight self_intro hometown_province_code hometown_city_code "
+              "residence_province_code residence_city_code mbti preference_age_min preference_age_max album_done")
+    row = dict.fromkeys(fields.split())
+    result = MagicMock()
+    result.mappings.return_value.first.return_value = row
+    db = AsyncMock()
+    db.execute.return_value = result
+
+    await profile.recalculate_completion(db, 42)
+
+    statements = [str(call.args[0]) for call in db.execute.await_args_list]
+    lock_index = next(
+        (index for index, sql in enumerate(statements)
+         if "FROM users" in sql and "FOR UPDATE" in sql),
+        None,
+    )
+    assert lock_index is not None, "重算完整度前必须对 users 行加锁"
+    completion_writes = [
+        index for index, sql in enumerate(statements)
+        if "user_profile_completion" in sql or "data_complete_rate" in sql
+    ]
+    assert completion_writes, "必须仍然写入完整度结果"
+    assert lock_index < min(completion_writes), "users 行锁必须先于任何完整度写入"

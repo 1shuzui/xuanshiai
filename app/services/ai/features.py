@@ -344,10 +344,10 @@ async def _load_consent_snapshot(
 ) -> dict[str, Any] | None:
     result = await db.execute(
         text(
-            "SELECT user_id, scope, version, policy_revision, granted_at "
+            "SELECT id AS grant_id, user_id, scope, version, policy_revision, granted_at "
             "FROM ai_consent_grant "
             "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-            "ORDER BY granted_at DESC LIMIT 1"
+            "ORDER BY id DESC LIMIT 1"
         ),
         {"user_id": user_id, "scope": scope},
     )
@@ -356,6 +356,7 @@ async def _load_consent_snapshot(
         return None
     granted_at = row.get("granted_at")
     return {
+        "grant_id": str(row.get("grant_id") or ""),
         "scope": row.get("scope") or scope,
         "version": row.get("version") or "",
         "policy_revision": row.get("policy_revision") or "",
@@ -366,21 +367,22 @@ async def _load_consent_snapshot(
 async def _consent_snapshot_is_current(
     db: AsyncSession, user_id: int, snapshot: dict[str, Any]
 ) -> bool:
-    """Require the pinned grant/version to still be active before projection write."""
+    """Require the pinned grant generation to remain active before projection write."""
     scope = str(snapshot.get("scope") or "")
     version = str(snapshot.get("version") or "")
-    if scope != PROFILE_CONSENT_SCOPE or not version:
+    grant_id = str(snapshot.get("grant_id") or "")
+    if scope != PROFILE_CONSENT_SCOPE or not version or not grant_id:
         return False
     result = await db.execute(
         text(
-            "SELECT version, policy_revision, granted_at FROM ai_consent_grant "
+            "SELECT id AS grant_id, version, policy_revision, granted_at FROM ai_consent_grant "
             "WHERE user_id = :user_id AND scope = :scope AND version = :version "
-            "AND revoked_at IS NULL ORDER BY granted_at DESC LIMIT 1"
+            "AND revoked_at IS NULL ORDER BY id DESC LIMIT 1"
         ),
         {"user_id": user_id, "scope": scope, "version": version},
     )
     row = await _first_row(result)
-    if row is None:
+    if row is None or str(row.get("grant_id") or "") != grant_id:
         return False
     if snapshot.get("policy_revision") and str(row.get("policy_revision") or "") != str(
         snapshot["policy_revision"]
@@ -732,94 +734,6 @@ async def read_memory_projection(
     return await MemoryProjectionService(db).read_active(
         owner_user_id=user_id, **dimension
     )
-
-
-def _legacy_canonical(
-    legacy: dict[str, Any] | None, projection_kind: ProjectionKind
-) -> dict[str, Any] | None:
-    """旧投影 dict -> canonical 文档（只有 field key 集，无 value）。"""
-
-    if legacy is None:
-        return None
-    from app.services.ai.memory.projection_compare import canonical_document
-
-    fields = legacy.get("fields")
-    entries = [
-        {"field_key": str(key), "value_type": None, "source_kind": None, "claim_id": None}
-        for key in (fields or {})
-    ]
-    return canonical_document(
-        subject=_subject_for_kind(projection_kind), status="active", entries=entries
-    )
-
-
-def _memory_canonical(memory_doc: dict[str, Any] | None) -> dict[str, Any] | None:
-    if memory_doc is None:
-        return None
-    from app.services.ai.memory.projection_compare import canonical_document
-
-    return canonical_document(
-        subject=memory_doc.get("subject"),
-        status=memory_doc.get("status"),
-        entries=list(memory_doc.get("entries") or ()),
-    )
-
-
-def _pseudonym(user_id: int) -> str:
-    return hashlib.sha256(f"projection-read:{user_id}".encode("utf-8")).hexdigest()[:12]
-
-
-async def read_projection_with_mode(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    projection_kind: ProjectionKind,
-    legacy_loader: Any,
-) -> dict[str, Any] | None:
-    """三态读取分发：legacy / shadow / memory（结果形状随模式而变）。
-
-    - legacy：只执行 ``legacy_loader``（零额外读）；
-    - shadow：双读，canonical diff 只写 hash/计数/字段 key/差异类型，
-      结果恒以旧链路为准；
-    - memory：只读记忆投影，缺失时按固定策略回退 legacy（fallback 计数日志）。
-    """
-
-    from app.services.ai.memory.projection_compare import canonical_diff
-
-    mode = memory_projection_read_mode()
-    legacy = await legacy_loader(db)
-    if mode == "legacy":
-        return legacy
-    memory_doc = await read_memory_projection(
-        db, user_id=user_id, projection_kind=projection_kind
-    )
-    if mode == "shadow":
-        diff = canonical_diff(
-            _legacy_canonical(legacy, projection_kind), _memory_canonical(memory_doc)
-        )
-        logger.info(
-            "memory_projection_shadow_diff user=%s kind=%s legacy_entries=%d "
-            "memory_entries=%d identical=%s diff_types=%s only_legacy=%s "
-            "only_memory=%s",
-            _pseudonym(user_id),
-            projection_kind.value,
-            diff.legacy_entry_count,
-            diff.memory_entry_count,
-            diff.is_identical,
-            diff.diff_types,
-            diff.field_keys_only_legacy,
-            diff.field_keys_only_memory,
-        )
-        return legacy
-    # memory 模式
-    if memory_doc is not None:
-        return memory_doc
-    logger.info(
-        "memory_projection_fallback user=%s kind=%s reason=projection_missing",
-        _pseudonym(user_id),
-        projection_kind.value,
-    )
-    return legacy
 
 
 async def read_memory_fields_for_kind(

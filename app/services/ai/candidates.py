@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterable
 from typing import Any, Protocol
 
@@ -36,6 +37,8 @@ from app.schemas.ai_moxiang import (
     CandidateRecord,
     CandidateRecordSchema,
 )
+logger = logging.getLogger(__name__)
+
 
 # 内容 hash 计算的字段顺序：必须稳定，跨进程 / 跨重启一致。
 _HASH_FIELDS_ORDER: tuple[str, ...] = (
@@ -418,6 +421,31 @@ def extract_master_candidates(
     return tuple(candidates)
 
 
+def _unconfirmed_partner_observation(source_span: str | None, content: str | None) -> bool:
+    """拒绝把具体第三人、引用、否定或犹豫直接写成择偶偏好。"""
+    text = " ".join(item.strip() for item in (source_span, content) if item)
+    if not text:
+        return False
+    negative_or_uncertain_cues = (
+        "不喜欢", "不希望", "不想", "不能接受", "不确定", "可能", "也许",
+        "不一定", "不代表", "不是我的标准", "据说", "听说",
+    )
+    if any(cue in text for cue in negative_or_uncertain_cues):
+        return True
+    preference_cues = (
+        "我希望", "我想找", "我看重", "我更看重", "我喜欢", "我偏好",
+        "我会被", "我在意", "期待对方", "找对象", "择偶", "受不了不",
+        "希望对方",
+    )
+    if any(cue in text for cue in preference_cues):
+        return False
+    observation_cues = (
+        "他", "她", "对方", "那个人", "我男朋友", "我女朋友", "我前任",
+        "只是",
+    )
+    return any(cue in text for cue in observation_cues)
+
+
 def candidates_from_master_result(
     *,
     subject: str,
@@ -425,22 +453,37 @@ def candidates_from_master_result(
     consent_version: str,
     policy_revision: str,
     source_turn_id: str,
+    owned_source_turn_ids: Iterable[str] | None = None,
+    replaceable_entry_keys: Iterable[str] | None = None,
 ) -> tuple[CandidateRecord, ...]:
-    """Map a typed moxiang Provider result into private, six-dimension evidence.
+    """Map one subject's typed provider result into private evidence.
 
-    The conversation prompt returns ``patches``.  The shared mock/provider
-    contract can additionally return ``fields`` or ``entries``; accepting all
-    three typed shapes keeps the journey deterministic in testing while the
-    worker still rejects malformed subjects, categories and schema versions.
-    The server, not the provider, owns provenance, so every candidate is tied
-    to the persisted turn being processed.
+    The source ids are server-owned: provider output may omit them, but it can
+    never introduce an id outside the caller's owned set.  A continuous_v2
+    result may contain both subjects; callers pass a filtered result per subject.
+
+    ``replaceable_entry_keys`` 是该主体当前正式稿的 entry field_key 集合
+    （continuous_v2 master 抽取专用）。传入时 modify patch 的替换目标写入候选
+    ``field_key``，成稿按同 key 覆盖执行替换；目标不在集合内的 modify 只丢弃
+    该条并留 warning，不影响同一轮的其他候选。``None``（legacy 与 update
+    路径）保持原行为：entry 候选的 ``field_key`` 始终为空。
     """
     expected_subject = ProfileSubject(subject)
+    allowed_source_ids = frozenset(
+        str(item) for item in (owned_source_turn_ids or (source_turn_id,)) if str(item)
+    )
+    if source_turn_id not in allowed_source_ids:
+        raise ValueError("source turn is not owned by the journey")
     if result.clarifying_question:
         raise ValueError("moxiang candidate extractor must not emit a question")
 
     candidates: list[CandidateRecord] = []
     seen_hashes: set[str] = set()
+    replaceable_targets = (
+        frozenset(str(item) for item in replaceable_entry_keys if str(item))
+        if replaceable_entry_keys is not None
+        else None
+    )
 
     def append_candidate(
         *,
@@ -452,9 +495,14 @@ def candidates_from_master_result(
         confidence: Any,
         item_subject: Any,
         source_span: Any,
+        item_source_ids: Iterable[str] = (),
     ) -> None:
         if item_subject is not expected_subject:
             raise ValueError("provider subject does not match journey subject")
+        provider_source_ids = tuple(str(item) for item in item_source_ids if str(item))
+        if provider_source_ids and not set(provider_source_ids).issubset(allowed_source_ids):
+            raise ValueError("provider source id is not owned by the journey")
+        source_ids = provider_source_ids or (source_turn_id,)
         if field_kind == "structured":
             if field_key not in AI_FIELD_ALLOWLIST:
                 raise ValueError("provider field is not in the allowlist")
@@ -464,6 +512,10 @@ def candidates_from_master_result(
             content = content.strip()
         else:
             raise ValueError("provider candidate kind is invalid")
+        if expected_subject is ProfileSubject.IDEAL_PARTNER and _unconfirmed_partner_observation(
+            source_span, content
+        ):
+            return
         if isinstance(confidence, bool) or not 0.0 <= float(confidence) <= 1.0:
             raise ValueError("provider confidence is outside the allowed range")
         if source_span is not None and not isinstance(source_span, str):
@@ -471,8 +523,11 @@ def candidates_from_master_result(
         profile_dimension = bucket_for_dimension(
             field_kind, field_key, category, content
         )
+        # entry 的语义身份不覆盖替换目标：Memory identity、断言模式索引与
+        # 投影反解都按 field_key=None 计算，替换目标只落在候选 field_key 列。
+        hash_field_key = field_key if field_kind == "structured" else None
         content_hash = compute_candidate_content_hash(
-            subject, field_kind, field_key, category, value, content
+            subject, field_kind, hash_field_key, category, value, content
         )
         if content_hash in seen_hashes:
             return
@@ -490,7 +545,7 @@ def candidates_from_master_result(
                 content=content,
                 value=value,
                 confidence=float(confidence),
-                source_turn_ids=(source_turn_id,),
+                source_turn_ids=source_ids,
                 source_span=source_span,
                 consent_version=consent_version,
                 policy_revision=policy_revision,
@@ -509,6 +564,7 @@ def candidates_from_master_result(
             confidence=field.confidence,
             item_subject=field.subject,
             source_span=field.source_span or field.source_quote,
+            item_source_ids=field.source_turn_ids,
         )
     for entry in result.entries:
         append_candidate(
@@ -520,17 +576,34 @@ def candidates_from_master_result(
             confidence=entry.confidence,
             item_subject=entry.subject,
             source_span=entry.source_span or entry.source_quote,
+            item_source_ids=entry.source_turn_ids,
         )
     for patch in result.patches:
+        patch_target_key: str | None = None
+        if replaceable_targets is not None and patch.action == "modify":
+            target_key = str(patch.replaces_field_key or "")
+            if target_key not in replaceable_targets:
+                # 目标不在本主体正式稿：模型幻觉或跨主体引用，丢弃单条并留痕，
+                # 不让一条坏 key 把整轮抽取判成终态失败（与 provider 边界
+                # _drop_invalid_extract_item 的先例一致）。
+                logger.warning(
+                    "moxiang_modify_target_dropped subject=%s category=%s target_len=%s",
+                    subject,
+                    patch.category,
+                    len(target_key),
+                )
+                continue
+            patch_target_key = target_key
         append_candidate(
             field_kind="entry",
-            field_key=None,
+            field_key=patch_target_key,
             category=patch.category,
             content=patch.content,
             value=None,
             confidence=patch.confidence,
             item_subject=patch.subject,
             source_span=patch.source_span or patch.source_quote,
+            item_source_ids=patch.source_turn_ids,
         )
     return tuple(candidates)
 

@@ -515,12 +515,18 @@ class ConsentFlowSession(FakeProjectionSession):
             return _WriteResultLocal(rowcount=1)
         if "INSERT INTO ai_consent_grant" in sql:
             self.store.consents[int(values["user_id"])] = {
+                "grant_id": 9001,
                 "scope": str(values["scope"]),
                 "version": str(values["version"]),
                 "policy_revision": str(values["policy_revision"]),
-                "granted_at": values["granted_at"],
+                "granted_at": "2026-09-06T08:00:00",
             }
             return _WriteResultLocal(rowcount=1)
+        if "LAST_INSERT_ID()" in sql:
+            row = self.store.consents[OWNER_ID]
+            return _FlowMappingResult([{
+                "grant_id": row["grant_id"], "granted_at": row["granted_at"]
+            }])
         if "UPDATE ai_consent_grant" in sql:
             row = self.store.consents.get(int(values["user_id"]))
             if row is not None and row.get("revoked_at") is None:

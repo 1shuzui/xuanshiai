@@ -415,7 +415,8 @@ async def grant_consent(
         return _decode_operation(existing, digest)
     if current_privacy != expected_privacy_revision:
         raise ConsentError("AI_CONSENT_VERSION_CONFLICT", "privacy revision is stale", 409)
-    granted_at = datetime.now(UTC).replace(tzinfo=None)
+    # 授权授时由 MySQL 生成，确保与 evidence 的 CURRENT_TIMESTAMP fence 同钟域。
+    granted_at = None
     # 缺陷8：撤销同一 (user_id, scope) 下任何已有的活跃授权，使 grant 成为
     # 「撤销旧 + 授予新」的原子操作，避免唯一键含 granted_at 导致重复授予两行。
     await db.execute(
@@ -432,16 +433,23 @@ async def grant_consent(
             text(
                 "INSERT INTO ai_consent_grant "
                 "(user_id, scope, version, policy_revision, granted_at) "
-                "VALUES (:user_id, :scope, :version, :policy_revision, :granted_at)"
+                "VALUES (:user_id, :scope, :version, :policy_revision, UTC_TIMESTAMP())"
             ),
             {
                 "user_id": user_id,
                 "scope": scope,
                 "version": body.consent_version,
                 "policy_revision": body.policy_revision,
-                "granted_at": granted_at,
             },
         )
+        row_result = await db.execute(
+            text("SELECT id AS grant_id, granted_at FROM ai_consent_grant WHERE id = LAST_INSERT_ID()")
+        )
+        grant_row = await _first(row_result)
+        if grant_row is None:
+            raise RuntimeError("new consent grant row could not be read")
+        grant_id = int(grant_row["grant_id"])
+        granted_at = grant_row["granted_at"]
     except IntegrityError:
         await db.rollback()
         existing = await _find_operation(db, user_id, "grant", idempotency_key)
@@ -466,6 +474,7 @@ async def grant_consent(
             scope=scope,
             revision=revision,
             consent_row={
+                "grant_id": grant_id,
                 "scope": scope,
                 "version": body.consent_version,
                 "policy_revision": body.policy_revision,

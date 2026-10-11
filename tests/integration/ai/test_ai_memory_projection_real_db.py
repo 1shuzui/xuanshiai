@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 
 import pytest
 from sqlalchemy import text
@@ -19,9 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import settings
 from app.schemas.ai_common import AiConsentGrantRequest
 from app.services.ai.consents import grant_consent
-from app.services.ai.memory.ledger import MemoryLedger
 from app.services.ai.memory.projections import (
-    ProjectionGrantDenied,
     MemoryProjectionService,
 )
 from app.services.ai.memory.service import MemoryService
@@ -451,31 +448,21 @@ async def test_real_mode_switch_never_touches_core_ledger(
 
     before = await _counts()
 
-    # legacy 模式：读取分发自定义 loader，不触碰任何记忆表。
+    # 通过真实搜索消费者验证模式切换，不依赖没有生产调用方的分发器。
     monkeypatch.setattr(settings, "ai_memory_projection_read_mode", "legacy")
-    from app.services.ai.features import read_projection_with_mode
-    from app.schemas.ai_common import ProjectionKind
+    from app.services.ai.search import _load_projections
 
-    async def _legacy_loader(db):
-        return {"fields": {"height_cm": 175}, "source_hash": "legacy"}
-
-    legacy_result = await read_projection_with_mode(
-        real_db_session,
-        user_id=USER_ID,
-        projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-        legacy_loader=_legacy_loader,
-    )
-    assert legacy_result == {"fields": {"height_cm": 175}, "source_hash": "legacy"}
+    legacy_result = await _load_projections(real_db_session, [USER_ID])
+    assert legacy_result == {}, "仅有 memory 投影时 legacy 不得混读"
 
     # shadow 模式：双读 + diff 日志，结果仍以 legacy 为准。
     monkeypatch.setattr(settings, "ai_memory_projection_read_mode", "shadow")
-    shadow_result = await read_projection_with_mode(
-        real_db_session,
-        user_id=USER_ID,
-        projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-        legacy_loader=_legacy_loader,
-    )
+    shadow_result = await _load_projections(real_db_session, [USER_ID])
     assert shadow_result == legacy_result
 
+    monkeypatch.setattr(settings, "ai_memory_projection_read_mode", "memory")
+    memory_result = await _load_projections(real_db_session, [USER_ID])
+    assert memory_result[USER_ID]["source"] == "memory_projection"
+
     after = await _counts()
-    assert before == after, "模式切换（legacy/shadow）不得修改 Core event/Claim"
+    assert before == after, "模式切换（legacy/shadow/memory）不得修改 Core event/Claim"

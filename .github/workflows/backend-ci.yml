@@ -72,3 +72,186 @@ jobs:
           tests/test_voice_ws.py
           tests/test_voice_providers_aliyun.py
           tests/test_voice_cleanup.py -q
+
+  # 审计整改（脱敏 / 数据范围 / 事务 / 报名软删除）：全部为不依赖 DB 的单元契约。
+  admin-scope-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: testing
+      AUTO_INIT_DB: "false"
+      DATABASE_URL: mysql+aiomysql://ci:ci@127.0.0.1:1/ci_unreachable
+      REDIS_URL: redis://127.0.0.1:1/5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend and dev dependencies
+        run: uv sync --locked --extra dev
+      - name: Ruff (admin scope, redaction and signup soft delete scope)
+        run: >-
+          uv run --no-sync ruff check
+          app/api/routes/activity_admin.py app/api/routes/customer_leads_admin.py
+          app/api/routes/matchmaker_crm_admin.py app/api/routes/matchmaker_member_admin.py
+          app/core/sensitive_fields.py app/services/community.py
+          app/services/customer_lead_admin.py app/services/finance.py
+          app/services/idempotency.py app/services/matchmaker_member_admin.py
+          app/services/message_admin.py
+          tests/test_activity_signup_soft_delete.py tests/test_admin_data_scope_d4.py
+          tests/test_certification_material_scope.py tests/test_crm_reassign_org_ownership.py
+          tests/test_finance_commission_anchor.py tests/test_matchmaker_crm_data_scope.py
+          tests/test_member_admin_scope_params.py tests/test_message_admin_redaction.py
+          tests/test_sensitive_operations.py tests/test_wechat_field_redaction.py
+      - name: Admin scope, redaction and soft delete contracts
+        env:
+          UPLOAD_DIR: ${{ runner.temp }}/xuanshiai-admin-uploads
+        run: >-
+          uv run --no-sync pytest
+          tests/test_message_admin_redaction.py
+          tests/test_wechat_field_redaction.py
+          tests/test_sensitive_operations.py
+          tests/test_member_admin_scope_params.py
+          tests/test_admin_data_scope_d4.py
+          tests/test_certification_material_scope.py
+          tests/test_crm_reassign_org_ownership.py
+          tests/test_finance_commission_anchor.py
+          tests/test_activity_signup_soft_delete.py
+          tests/test_matchmaker_crm_data_scope.py -q
+
+  # 画像会话契约（master 活动槽抢占与复用、会话状态终态守卫、journey/start 响应
+  # 字段）：全部为不依赖 DB 的内存假库单元契约。test_master_session.py 与
+  # test_ai_profile_sessions.py 此前未被任何 job 执行，属既有缺口，一并补上。
+  ai-profile-session-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: testing
+      AUTO_INIT_DB: "false"
+      DATABASE_URL: mysql+aiomysql://ci:ci@127.0.0.1:1/ci_unreachable
+      REDIS_URL: redis://127.0.0.1:1/5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend and dev dependencies
+        run: uv sync --locked --extra dev
+      - name: Ruff (profile session and moxiang journey scope)
+        run: >-
+          uv run --no-sync ruff check
+          app/api/routes/ai_moxiang.py app/services/ai/profile.py
+          tests/test_ai_profile_sessions.py tests/test_master_session.py
+          tests/test_moxiang_journey_start_contract.py
+          tests/test_ai_profile_field_metadata.py
+      - name: Profile session and moxiang journey contracts
+        env:
+          UPLOAD_DIR: ${{ runner.temp }}/xuanshiai-ai-session-uploads
+        run: >-
+          uv run --no-sync pytest
+          tests/test_master_session.py
+          tests/test_moxiang_journey_start_contract.py
+          tests/test_ai_profile_sessions.py
+          tests/test_ai_profile_publish.py
+          tests/test_ai_profile_entries.py
+          tests/test_ai_profile_field_metadata.py -q
+
+  # continuous_v2 新链路门禁：双画像抽取、成稿替换语义、删除后 Memory 一致性与
+  # 预览/确认路由契约。全部为不依赖 DB 的单元契约，但此前没有任何 job 执行——
+  # 这正是 2026-10-08 验收报告指出的「新业务没进 CI」缺口。
+  ai-continuous-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: testing
+      AUTO_INIT_DB: "false"
+      DATABASE_URL: mysql+aiomysql://ci:ci@127.0.0.1:1/ci_unreachable
+      REDIS_URL: redis://127.0.0.1:1/5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend and dev dependencies
+        run: uv sync --locked --extra dev
+      - name: Ruff (continuous portrait scope)
+        run: >-
+          uv run --no-sync ruff check
+          app/services/ai/candidates.py app/services/ai/continuous.py
+          app/services/ai/search.py app/services/ai/compatibility.py app/services/ai/recommend.py
+          app/services/ai/features.py
+          app/services/ai/continuous_memory.py app/services/ai/journey.py
+          app/services/ai/prompts/profile_extract.py
+          app/services/voice/realtime/context.py
+          app/services/voice/realtime/moxiang_bridge.py
+          app/api/routes/voice_moxiang.py
+          tests/test_ai_continuous_dual_journey.py
+          tests/test_ai_continuous_memory.py
+          tests/test_ai_continuous_revision_dependencies.py
+          tests/test_ai_continuous_routes.py tests/test_ai_continuous_docs.py
+          tests/test_ai_profile_preview.py
+          tests/test_ai_moxiang_candidate_pool.py
+          tests/test_worker_registration.py
+          tests/test_ai_memory_projection_shadow.py tests/test_ai_search_memory_projection.py
+      - name: Continuous portrait and preview contracts
+        env:
+          UPLOAD_DIR: ${{ runner.temp }}/xuanshiai-continuous-uploads
+        run: >-
+          uv run --no-sync pytest
+          tests/test_ai_continuous_dual_journey.py
+          tests/test_ai_continuous_memory.py
+          tests/test_ai_continuous_revision_dependencies.py
+          tests/test_ai_continuous_routes.py
+          tests/test_ai_continuous_docs.py
+          tests/test_ai_profile_preview.py
+          tests/test_ai_moxiang_candidate_pool.py
+          tests/test_worker_registration.py
+          tests/test_worker_finalize_gate.py tests/test_worker_lease_safety.py
+          tests/test_ai_memory_projection_shadow.py tests/test_ai_search_memory_projection.py
+          tests/test_ai_feature_projection.py -q
+
+  # 隔离真实库集成：使用本 job 自己创建的 MySQL/Redis service，覆盖 continuous
+  # 成稿/确认事务、WS→候选→Worker→预览→确认链路与 Memory/投影。绝不连接开发或
+  # 生产库：所有 URL 都指向本 job 的 service 容器。
+  ai-continuous-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ENVIRONMENT: testing
+      AUTO_INIT_DB: "false"
+      AI_TEST_DATABASE_URL: mysql+aiomysql://root:@127.0.0.1:3306/xuanshiai_ai_test
+      AI_TEST_REDIS_URL: redis://127.0.0.1:6379/5
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: xuanshiai_ai_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend and dev dependencies
+        run: uv sync --locked --extra dev
+      - name: Continuous portrait real-db integration
+        env:
+          UPLOAD_DIR: ${{ runner.temp }}/xuanshiai-continuous-integration-uploads
+        run: >-
+          uv run --no-sync pytest
+          tests/integration/ai/test_continuous_portrait_real_db.py
+          tests/integration/ai/test_moxiang_journey_ws_chain_real_db.py
+          tests/integration/ai/test_ai_memory_projection_real_db.py
+          tests/integration/ai/test_consent_generation_identity_real_db.py -q

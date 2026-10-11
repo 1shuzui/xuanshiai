@@ -4,8 +4,8 @@
 - invalid mode values fail fast;
 - shadow dual-reads but always returns the legacy result, logging only
   hashes / counts / field keys / diff types (never values or quotes);
-- memory mode returns the memory projection and falls back to legacy with a
-  fallback log when the projection is missing;
+- the production search reader is memory-only in memory mode; missing or
+  revoked projections never fall back to legacy;
 - canonical diff compares only subject / field key / value type / status /
   source kind / claim id / version — never sensitive values.
 """
@@ -13,16 +13,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
 from app.core.config import settings
+from app.services.ai import search as search_mod
 from app.services.ai.features import (
     MEMORY_PROJECTION_READ_MODES,
     memory_dimension_for_kind,
     memory_projection_read_mode,
-    read_projection_with_mode,
+    read_memory_fields_for_kind,
 )
 from app.services.ai.memory.projection_compare import (
     ProjectionDiff,
@@ -88,13 +88,6 @@ async def seed_memory_projection(
     )
 
 
-def legacy_loader(legacy: dict[str, Any] | None):
-    async def _load(db) -> dict[str, Any] | None:
-        return legacy
-
-    return _load
-
-
 LEGACY_PROJECTION = {
     "fields": {"height_cm": 175, "interest_tags": ["hiking"]},
     "source_hash": "legacy-hash",
@@ -136,17 +129,14 @@ async def test_legacy_mode_reads_only_legacy(
     session = FakeProjectionSession(store)
     calls = {"count": 0}
 
-    async def loader(db):
+    async def loader(db, user_ids):
         calls["count"] += 1
-        return LEGACY_PROJECTION
+        assert user_ids == [OWNER_ID]
+        return {OWNER_ID: LEGACY_PROJECTION}
 
-    result = await read_projection_with_mode(
-        session,
-        user_id=OWNER_ID,
-        projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-        legacy_loader=loader,
-    )
-    assert result == LEGACY_PROJECTION
+    monkeypatch.setattr(search_mod, "_load_legacy_projections", loader)
+    result = await search_mod._load_projections(session, [OWNER_ID])
+    assert result == {OWNER_ID: LEGACY_PROJECTION}
     assert calls["count"] == 1
     assert session.calls == [], "legacy 模式不得读记忆投影表"
 
@@ -160,14 +150,16 @@ async def test_shadow_dual_reads_but_legacy_wins(
     session = FakeProjectionSession(store)
     sensitive_value = "我每天早上都要喝一杯咖啡"
 
-    with caplog.at_level("INFO", logger="app.services.ai.features"):
-        result = await read_projection_with_mode(
-            session,
-            user_id=OWNER_ID,
-            projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-            legacy_loader=legacy_loader(LEGACY_PROJECTION),
-        )
-    assert result == LEGACY_PROJECTION, "shadow 模式结果以旧链路为准"
+    legacy = {OWNER_ID: {"fields": {"height_cm": 175, "interest_tags": [sensitive_value]}}}
+
+    async def loader(db, user_ids):
+        return legacy
+
+    monkeypatch.setattr(search_mod, "_load_legacy_projections", loader)
+    with caplog.at_level("INFO", logger="app.services.ai.search"):
+        result = await search_mod._load_projections(session, [OWNER_ID])
+    assert result == legacy, "shadow 模式结果以旧链路为准"
+    assert session.calls, "shadow 必须实际读取记忆投影"
     diff_lines = [
         record.getMessage()
         for record in caplog.records
@@ -180,6 +172,10 @@ async def test_shadow_dual_reads_but_legacy_wins(
     assert "175" not in message, "diff 日志不得携带字段值"
 
 
+async def forbidden_legacy_loader(*args):
+    raise AssertionError("memory 模式不能读取或回退旧投影")
+
+
 async def test_memory_mode_returns_memory_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -188,38 +184,38 @@ async def test_memory_mode_returns_memory_projection(
     await seed_memory_projection(store)
     session = FakeProjectionSession(store)
 
-    result = await read_projection_with_mode(
+    monkeypatch.setattr(search_mod, "_load_legacy_projections", forbidden_legacy_loader)
+    result = await search_mod._load_projections(session, [OWNER_ID])
+    assert result[OWNER_ID]["source"] == "memory_projection"
+    assert result[OWNER_ID]["fields"]
+    fields = await read_memory_fields_for_kind(
         session,
         user_id=OWNER_ID,
         projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-        legacy_loader=legacy_loader(LEGACY_PROJECTION),
     )
-    assert result is not None
-    assert "projection_id" in result, "memory 模式返回记忆投影文档"
-    assert result["entries"][0]["claim_id"] == "c_ok"
+    assert fields["fields"] == result[OWNER_ID]["fields"]
+    assert fields["evidence"][0]["claim_id"] == "c_ok"
 
 
-async def test_memory_mode_falls_back_to_legacy_when_missing(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("missing", ["projection", "grant", "consent"])
+async def test_memory_mode_never_falls_back_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch, missing: str,
 ) -> None:
     set_mode(monkeypatch, "memory")
-    store = ProjectionStore()  # 无投影
+    store = ProjectionStore()
+    if missing != "projection":
+        await seed_memory_projection(store)
+        if missing == "grant":
+            store.grants[(OWNER_ID, "search", "candidate_filter", "personal_profile")]["status"] = "revoked"
+        else:
+            store.consents[OWNER_ID]["version"] = "rotated-consent"
     session = FakeProjectionSession(store)
 
-    with caplog.at_level("INFO", logger="app.services.ai.features"):
-        result = await read_projection_with_mode(
-            session,
-            user_id=OWNER_ID,
-            projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
-            legacy_loader=legacy_loader(LEGACY_PROJECTION),
-        )
-    assert result == LEGACY_PROJECTION, "缺投影时按固定策略回退 legacy"
-    fallback_lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "memory_projection_fallback" in record.getMessage()
-    ]
-    assert fallback_lines, "回退必须计数日志"
+    monkeypatch.setattr(search_mod, "_load_legacy_projections", forbidden_legacy_loader)
+    assert await search_mod._load_projections(session, [OWNER_ID]) == {}
+    assert await read_memory_fields_for_kind(
+        session, user_id=OWNER_ID, projection_kind=ProjectionKind.PERSONAL_SEARCHABLE,
+    ) is None
 
 
 # ---------------------------------------------------------------------------

@@ -126,6 +126,8 @@ class ProjectionStore:
     ) -> None:
         self.consents.append(
             {
+                # R5：授权快照按持久 grant 行 id 识别代际，读取链要求快照带 grant_id。
+                "grant_id": f"grant-{int(user_id)}",
                 "user_id": int(user_id),
                 "scope": scope,
                 "version": "profile-text-v1",
@@ -680,6 +682,7 @@ async def test_build_feature_projection_uses_pinned_revision_and_consent_snapsho
     store.seed_revision_field(second_id, "interest_tags", ["音乐"], subject="personal")
     store.seed_consent(10)
     pinned_consent = {
+        "grant_id": store.consents[-1]["grant_id"],
         "scope": "profile_text_extract",
         "version": "profile-text-v1",
         "policy_revision": "ai-policy-2026-08-07-v1",

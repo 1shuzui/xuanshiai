@@ -107,6 +107,8 @@ SEARCH_PARSE_TASK_TYPE = "search_parse"
 SEARCH_SUGGEST_TASK_TYPE = "search_suggest"
 SEARCH_EXECUTE_TASK_TYPE = "search_execute"
 SEARCH_CLEANUP_TASK_TYPE = "cleanup"
+# 解析任务成功后的 result_ref 形态：`search-draft:<draft_id>`（见 parse_search_draft）。
+SEARCH_DRAFT_RESULT_REF_PREFIX = "search-draft:"
 # 结果证据 TTL：与统一方案 §8.3 示例的 result_expires_at（10 分钟）一致。
 SEARCH_RESULT_TTL_MINUTES = 10
 SEARCH_PAGE_SIZE_DEFAULT = 20
@@ -325,25 +327,88 @@ def _dict_value(value: Any, key: str) -> Any:
     return value[key]
 
 
+def _strip_wrapping_quotes(text: str) -> str:
+    cleaned = text.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'"):
+        return cleaned[1:-1].strip()
+    return cleaned
+
+
+def _normalize_condition_value(field_key: str, operator: str, value: Any) -> Any:
+    """把真实 LLM 输出归一为冻结契约的类型（解析落库前统一调用）。
+
+    真实供应商对同一字段会输出 330100、"310100"、'"310100"'、28、"28" 等多种
+    形态；不落库前归一，编译期 eq/IN 等值会静默失配（2026-10-01 真实链路验证）。
+    """
+    if value is None:
+        return None
+
+    def _clean_scalar(item: Any) -> Any:
+        if isinstance(item, bool) or item is None:
+            return None
+        if isinstance(item, (int, float)):
+            return item
+        text = _strip_wrapping_quotes(str(item))
+        return text or None
+
+    if field_key == "city_code":
+        if isinstance(value, list):
+            normalized = [cleaned for item in value if (cleaned := _clean_scalar(item)) is not None]
+            return normalized or None
+        return _clean_scalar(value)
+    if field_key in ("age", "height_cm", "income_band", "education_level", "marriage_status"):
+        def _as_number(item: Any) -> Any:
+            if isinstance(item, bool) or item is None:
+                return None
+            if isinstance(item, (int, float)):
+                return item
+            text = _strip_wrapping_quotes(str(item))
+            try:
+                return int(text)
+            except ValueError:
+                try:
+                    return float(text)
+                except ValueError:
+                    return item
+        if isinstance(value, dict):
+            return {key: _as_number(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [_as_number(item) for item in value]
+        return _as_number(value)
+    if field_key in ("interest_tags", "lifestyle_tags", "occupation_group", "relationship_goal"):
+        if isinstance(value, list):
+            cleaned = [_strip_wrapping_quotes(str(item)) for item in value]
+            cleaned = [item for item in cleaned if item]
+            return cleaned or value
+        if isinstance(value, str):
+            return _strip_wrapping_quotes(value) or value
+    return value
+
+
 def _single_city(value: Any) -> str:
     if isinstance(value, str) and value.strip():
-        return value.strip()
+        return _strip_wrapping_quotes(value)
+    # 真实解析链路中 LLM 会把 6 位城市码输出为整数；归一为字符串再入库。
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
     if (
         isinstance(value, list)
         and len(value) == 1
-        and isinstance(value[0], str)
-        and value[0].strip()
+        and isinstance(value[0], (str, int))
+        and not isinstance(value[0], bool)
+        and str(value[0]).strip()
     ):
-        return value[0].strip()
+        return _strip_wrapping_quotes(str(value[0]))
     raise SearchInputInvalid("city_code 筛选一次仅支持一座城市")
 
 
 def _city_values(value: Any) -> tuple[str, ...]:
     values = value if isinstance(value, list) else [value]
     normalized = tuple(
-        item.strip()
+        _strip_wrapping_quotes(str(item))
         for item in values
-        if isinstance(item, str) and item.strip()
+        if (isinstance(item, str) and item.strip())
+        or (isinstance(item, int) and not isinstance(item, bool))
     )
     if not normalized or len(normalized) != len(values):
         raise SearchInputInvalid("city_code in 必须是非空城市编码数组")
@@ -565,6 +630,7 @@ def _consent_snapshot(row: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     granted_at = row.get("granted_at")
     return {
+        "grant_id": str(row.get("grant_id") or ""),
         "scope": str(row.get("scope") or SEARCH_CONSENT_SCOPE),
         "version": str(row.get("version") or ""),
         "policy_revision": str(row.get("policy_revision") or SEARCH_POLICY_REVISION),
@@ -577,10 +643,10 @@ async def _load_active_consent(
 ) -> dict[str, Any] | None:
     result = await db.execute(
         text(
-            "SELECT user_id, scope, version, policy_revision, granted_at "
+            "SELECT id AS grant_id, user_id, scope, version, policy_revision, granted_at "
             "FROM ai_consent_grant "
             "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-            "ORDER BY granted_at DESC LIMIT 1"
+            "ORDER BY id DESC LIMIT 1"
         ),
         {"user_id": user_id, "scope": scope},
     )
@@ -786,6 +852,7 @@ def _condition_from_row(row: dict[str, Any]) -> SearchCondition:
 
 def _condition_read_from_row(row: dict[str, Any]) -> SearchConditionRead:
     return SearchConditionRead(
+        condition_no=int(row["condition_no"]),
         field_key=str(row["field_key"]),
         operator=str(row["operator"]),
         value=_maybe_json(row.get("value_json")),
@@ -991,6 +1058,31 @@ def normalize_search_query(query_text: str) -> str:
     return normalized
 
 
+async def _recover_replayed_draft_id(
+    db: AsyncSession, owner_user_id: int, task: AiTaskRecord
+) -> str:
+    """同键重放时恢复草稿引用。
+
+    正常路径从 ``payload_summary.draft_id`` 取；任务进入 succeeded 后该列被清空，
+    此时只能从 ``result_ref``（``search-draft:<draft_id>``）恢复。恢复出的草稿必须
+    仍属于同一 owner，否则视为无效引用，继续走"缺少草稿引用"分支。
+    """
+    payload = task.payload_summary or {}
+    draft_id = str(payload.get("draft_id") or "").strip()
+    if draft_id:
+        return draft_id
+    result_ref = str(task.result_ref or "").strip()
+    if not result_ref.startswith(SEARCH_DRAFT_RESULT_REF_PREFIX):
+        return ""
+    recovered = result_ref[len(SEARCH_DRAFT_RESULT_REF_PREFIX):].strip()
+    if not recovered:
+        return ""
+    row = await _load_draft_row(db, recovered)
+    if row is None or int(row["user_id"]) != owner_user_id:
+        return ""
+    return recovered
+
+
 async def create_search_draft(
     db: AsyncSession,
     owner_user_id: int,
@@ -1015,8 +1107,9 @@ async def create_search_draft(
     )
     if existing is not None:
         _replay_or_conflict(existing, request_hash)
-        payload = existing.payload_summary or {}
-        existing_draft_id = payload.get("draft_id")
+        # 任务成功后 payload_summary 会被清空（只剩 result_ref）；同键重放不能因此
+        # 直接判定"缺少草稿引用"，而应从结果引用恢复引用后正常返回。
+        existing_draft_id = await _recover_replayed_draft_id(db, owner_user_id, existing)
         if not existing_draft_id:
             raise TaskError(
                 code="AI_INPUT_INVALID",
@@ -1165,7 +1258,9 @@ async def parse_search_draft(
                 condition_no,
                 str(condition.field_key),
                 str(condition.operator),
-                condition.value,
+                _normalize_condition_value(
+                    str(condition.field_key), str(condition.operator), condition.value
+                ),
                 str(condition.kind),
                 float(condition.confidence),
                 condition.source_span,
@@ -2273,19 +2368,20 @@ async def _active_consent_matches(
 ) -> bool:
     scope = str(snapshot.get("scope") or "")
     version = str(snapshot.get("version") or "")
-    if not scope or not version or (expected_scope and scope != expected_scope):
+    grant_id = str(snapshot.get("grant_id") or "")
+    if not scope or not version or not grant_id or (expected_scope and scope != expected_scope):
         return False
     row = await _first_row(
         await db.execute(
             text(
-                "SELECT version, policy_revision, granted_at FROM ai_consent_grant "
+                "SELECT id AS grant_id, version, policy_revision, granted_at FROM ai_consent_grant "
                 "WHERE user_id = :user_id AND scope = :scope AND version = :version "
-                "AND revoked_at IS NULL ORDER BY granted_at DESC LIMIT 1"
+                "AND revoked_at IS NULL ORDER BY id DESC LIMIT 1"
             ),
             {"user_id": user_id, "scope": scope, "version": version},
         )
     )
-    if row is None:
+    if row is None or str(row.get("grant_id") or "") != grant_id:
         return False
     if str(row.get("policy_revision") or "") != str(snapshot.get("policy_revision") or ""):
         return False
@@ -2854,26 +2950,6 @@ async def delete_search_snapshot(
 # ----------------------------------------------------------------------
 
 
-def register_search_handlers() -> None:
-    """把 search 相关 handler 与完成期发布器注册进 AI Worker。
-
-    模块导入时自动注册（路由导入本模块即生效）；幂等，可在测试中重复调用。
-    ``search_suggest`` 登记完成期发布器：handler 只暂存，发布由 Worker 在
-    complete_task 提交成功后调用（修复清单 §3.7.2）。
-    """
-    from app.workers import ai_worker as worker_module
-
-    worker_module.TASK_HANDLERS.setdefault(SEARCH_PARSE_TASK_TYPE, parse_search_draft)
-    worker_module.TASK_HANDLERS.setdefault(
-        SEARCH_EXECUTE_TASK_TYPE, search_execute_handler
-    )
-    worker_module.TASK_HANDLERS.setdefault(
-        SEARCH_SUGGEST_TASK_TYPE, search_suggest_handler
-    )
-    worker_module.register_post_complete_publisher(
-        SEARCH_SUGGEST_TASK_TYPE, publish_search_suggest
-    )
-
 # ----------------------------------------------------------------------
 # WP-S3：猜你喜欢 AI 化（search_suggest 任务 + 24h Redis 缓存 + 频控 + 降级）
 # ----------------------------------------------------------------------
@@ -3429,4 +3505,3 @@ async def _mark_suggest_publish_superseded(db: AsyncSession, task_id: str) -> No
 
 # 模块末尾注册：保证上方全部任务类型/handler 符号已定义，避免与
 # ai_worker 的相互导入在半初始化状态下取不到新符号（WP-S3）。
-register_search_handlers()

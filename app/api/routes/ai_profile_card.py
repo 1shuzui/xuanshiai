@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user
@@ -13,10 +13,12 @@ from app.core.config import settings
 from app.core.logging import request_id_context
 from app.db.session import get_db
 from app.schemas.ai_common import AiErrorResponse
+from app.schemas.ai_profile import ProfileSubject
 from app.schemas.ai_profile_card import (
     ProfileCardApplyRequest,
     ProfileCardApplyResponse,
     ProfileCardDraftRead,
+    ProfileCardExportResponse,
     ProfileCardSummarizeAccepted,
     ProfileCardSummarizeRequest,
 )
@@ -29,6 +31,11 @@ from app.services.ai.profile_card import (
     apply_profile_card_draft,
     load_profile_card_draft,
     request_profile_card_summarize,
+)
+from app.services.ai.profile_card_export import (
+    ProfileCardExportStale,
+    ProfileCardExportUnavailable,
+    export_public_profile_card,
 )
 from app.services.ai.tasks import TaskError
 
@@ -123,6 +130,7 @@ async def summarize_profile_card_route(
     await db.commit()
     return ProfileCardSummarizeAccepted(
         task_id=submission.task.task_id,
+        draft_id=submission.draft_id,
         status=submission.task.status,
         poll_url=f"/api/v1/ai/tasks/{submission.task.task_id}",
         replayed=submission.replayed,
@@ -133,15 +141,16 @@ async def summarize_profile_card_route(
     "/profile-card/draft",
     response_model=ProfileCardDraftRead,
     status_code=status.HTTP_200_OK,
-    summary="读取本人最新未丢弃的资料卡草稿",
+    summary="按 draft_id 或兼容读取本人未丢弃的资料卡草稿",
 )
 async def get_profile_card_draft_route(
+    draft_id: str | None = Query(default=None, min_length=1, max_length=64, description="精确读取本人草稿；省略时兼容读取最新草稿"),
     current: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ProfileCardDraftRead:
     _require_profile_feature()
     try:
-        return await load_profile_card_draft(db, current.id)
+        return await load_profile_card_draft(db, current.id, draft_id=draft_id)
     except AIConsentRequired as exc:
         raise _error_response(exc.code, exc.message, exc.status_code) from exc
     except ProfileCardDraftNotFound as exc:
@@ -184,6 +193,8 @@ async def apply_profile_card_draft_route(
         raise _error_response(exc.code, exc.message, exc.status_code) from exc
     except ProfileCardVersionConflict as exc:
         raise _error_response(exc.code, exc.message, exc.status_code) from exc
+    except TaskError as exc:
+        raise _error_response(exc.code, exc.message, exc.status_code) from exc
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - 统一包装未知错误
@@ -193,5 +204,57 @@ async def apply_profile_card_draft_route(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             retryable=True,
         ) from exc
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as exc:  # pragma: no cover - 提交失败也必须回滚整笔 apply
+        await db.rollback()
+        raise _error_response(
+            "AI_TEMPORARILY_UNAVAILABLE",
+            "资料卡草稿写入暂时不可用",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            retryable=True,
+        ) from exc
     return ProfileCardApplyResponse.model_validate(result)
+
+
+@router.get(
+    "/profile-card/export",
+    response_model=ProfileCardExportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="导出当前 personal 正式版本已采用的公开资料卡字段（海报用）",
+)
+async def export_profile_card_route(
+    revision_id: int = Query(
+        ...,
+        ge=1,
+        description="调用方当前查看的 personal 正式版本 ID；与服务端当前正式版本不一致时返回 409",
+    ),
+    current: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileCardExportResponse:
+    _require_profile_feature()
+    try:
+        payload = await export_public_profile_card(
+            db,
+            current.id,
+            subject=ProfileSubject.PERSONAL,
+            revision_id=revision_id,
+        )
+    except AIConsentRequired as exc:
+        raise _error_response(exc.code, exc.message, exc.status_code) from exc
+    except AIInputError as exc:
+        raise _error_response(exc.code, exc.message, exc.status_code) from exc
+    except ProfileCardExportStale as exc:
+        raise _error_response(exc.code, exc.message, exc.status_code) from exc
+    except ProfileCardExportUnavailable as exc:
+        raise _error_response(exc.code, exc.message, exc.status_code) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - 统一包装未知错误
+        raise _error_response(
+            "AI_TEMPORARILY_UNAVAILABLE",
+            "资料卡公开导出暂时不可用",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            retryable=True,
+        ) from exc
+    return ProfileCardExportResponse.model_validate(payload)

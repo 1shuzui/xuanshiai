@@ -431,6 +431,7 @@ def make_service(
     store = ProjectionStore()
     if with_consent:
         store.consents[OWNER_ID] = {
+            "grant_id": 101,
             "scope": "profile_text_extract",
             "version": "profile_text_extract-v3",
             "policy_revision": policy_revision,
@@ -456,8 +457,6 @@ def seed_projection(
     snapshot_id: str | None = None,
     policy_revision: str = POLICY_REVISION,
 ) -> dict[str, Any]:
-    from app.services.ai.memory.projections import derive_consent_snapshot_id
-
     key = (owner, function_key, purpose, data_category)
     row = {
         "projection_id": f"prj_{owner}_{function_key}_{version}",
@@ -498,6 +497,19 @@ def seed_projection(
 # ---------------------------------------------------------------------------
 # grant：服务端重读授权 + 幂等
 # ---------------------------------------------------------------------------
+
+
+async def test_consent_snapshot_id_distinguishes_same_second_grant_generations() -> None:
+    base = {
+        "scope": "profile_text_extract",
+        "version": "profile_text_extract-v3",
+        "policy_revision": POLICY_REVISION,
+        "granted_at": "2026-09-05T08:00:00",
+    }
+    first = derive_consent_snapshot_id(dict(base, grant_id=101))
+    second = derive_consent_snapshot_id(dict(base, grant_id=102))
+    assert first != second
+    assert derive_consent_snapshot_id(base) not in {first, second}
 
 
 async def test_grant_requires_active_consent() -> None:
@@ -551,7 +563,6 @@ async def test_duplicate_grant_is_idempotent() -> None:
         **GRANT_KWARGS, consent_snapshot_id=snapshot_id, policy_revision=POLICY_REVISION
     )
     assert first["grant_id"] == second["grant_id"]
-    key = (OWNER_ID, "search", "candidate_filter", "personal_profile")
     assert len(store.grants) == 1
 
 

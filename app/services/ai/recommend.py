@@ -518,10 +518,10 @@ async def viewer_projection_is_current(db: AsyncSession, viewer_id: int) -> bool
 async def _load_active_consent(db: AsyncSession, user_id: int, scope: str) -> dict | None:
     result = await db.execute(
         text(
-            "SELECT user_id, scope, version, policy_revision, granted_at "
+            "SELECT id AS grant_id, user_id, scope, version, policy_revision, granted_at "
             "FROM ai_consent_grant "
             "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-            "ORDER BY granted_at DESC LIMIT 1"
+            "ORDER BY id DESC LIMIT 1"
         ),
         {"user_id": int(user_id), "scope": scope},
     )
@@ -827,24 +827,6 @@ async def recommend_rebuild_handler(
     )
 
 
-def register_recommend_handlers() -> None:
-    """把 ``recommend_rebuild`` 注册进 AI Worker 的 TASK_HANDLERS（幂等）。
-
-    权威注册路径是 ``ai_worker.register_business_handlers``（standalone worker
-    唯一可靠入口）；此处为路由/测试导入路径的幂等兜底，容错部分初始化。
-    """
-    from app.workers import ai_worker as worker_module
-
-    handlers = getattr(worker_module, "TASK_HANDLERS", None)
-    if handlers is not None:
-        handlers.setdefault(RECOMMEND_TASK_TYPE, recommend_rebuild_handler)
-    else:
-        logger.warning(
-            "recommend handler registration skipped: ai_worker partially initialized"
-        )
-
-
-register_recommend_handlers()
 
 
 # ----------------------------------------------------------------------
@@ -917,8 +899,48 @@ async def _pool_eligible_candidate_ids(
     return personal_seen
 
 
+async def _attach_public_cards(
+    db: AsyncSession, viewer_id: int, items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """为已通过推荐资格过滤的候选装配公开名片，不触发浏览副作用。"""
+    if not items:
+        return []
+    # 延迟导入避免 discovery 与推荐任务模块形成导入环；这些 helper 只做
+    # 可见性裁剪/公开字段组装，不调用 view_profile。
+    from app.services.discovery import (
+        _candidate_score,
+        _card,
+        _is_vip,
+        _target_rows,
+        _viewer_context,
+    )
+
+    target_ids = [int(item["target_user_id"]) for item in items]
+    rows = await _target_rows(db, viewer_id, target_ids)
+    viewer = await _viewer_context(db, viewer_id)
+    viewer_is_vip = await _is_vip(db, viewer_id)
+    enriched: list[dict[str, Any]] = []
+    for item in items:
+        target_id = int(item["target_user_id"])
+        row = rows.get(target_id)
+        if row is None:
+            # 可见性在两次读取之间变化时，不返回无名片的推荐解释。
+            continue
+        legacy_score, legacy_reason = _candidate_score(viewer, row)
+        public_card = _card(
+            row,
+            legacy_score,
+            legacy_reason,
+            detail_locked=bool(row.get("only_vip_can_see_detail")) and not viewer_is_vip,
+        )
+        enriched_item = dict(item)
+        enriched_item["card"] = public_card.model_dump()
+        enriched.append(enriched_item)
+    return enriched
+
+
 async def read_recommendations(
-    db: AsyncSession, viewer_id: int, view_kind: str, limit: int
+    db: AsyncSession, viewer_id: int, view_kind: str, limit: int, *, include_card: bool = False
 ) -> list[dict[str, Any]]:
     """读取某视图的 ready 快照（过期视为 miss），按 rank_no 升序。
 
@@ -972,6 +994,8 @@ async def read_recommendations(
         )
         if len(items) >= int(limit):
             break
+    if include_card:
+        return await _attach_public_cards(db, viewer_id, items)
     return items
 
 

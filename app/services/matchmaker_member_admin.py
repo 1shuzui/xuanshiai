@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.sensitive_fields import is_masked_value, mask_phone
 from app.schemas.matchmaker_member_admin import (
     CertificationDetail,
     CertificationMaterial,
@@ -17,13 +18,23 @@ from app.schemas.matchmaker_member_admin import (
 
 
 def _mask_phone(phone: str | None) -> str | None:
-    if not phone:
-        return None
-    return f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 7 else "***"
+    # 旧实现用 ``phone[:3] + **** + phone[-4:]``：号码只有 7-8 位时首尾保留位数已达总长，
+    # 等于把整串号码原样返回。改为复用 mask_middle 的“不足则全掩码”口径。
+    return mask_phone(phone)
 
 
-async def _member(db: AsyncSession, member_id: int) -> MatchmakerMemberAdminItem:
-    row = (await db.execute(text("""SELECT u.id, u.nickname, u.phone, u.gender, u.status,
+async def _member(
+    db: AsyncSession, member_id: int, scope: str, scope_params: dict[str, object],
+) -> MatchmakerMemberAdminItem:
+    """读取单个会员。
+
+    ``scope`` 由调用方通过 `CurrentMatchmakerAdmin.scope_exists_clause` 生成（D-4）；
+    ``scope_params`` 必须是生成谓词时用的**同一个**参数字典：谓词里的 ``:scope_*``
+    占位符只能靠它绑定。各处早先传一次性空字典，使 SELF / STORE / ORGANIZATION 三档
+    普通账号因参数缺失而无法编辑本人范围内会员，因此本参数不接受默认值。
+    越权访问统一按 404 「会员不存在」返回，避免通过状态码差异枚举他组织会员 ID。
+    """
+    row = (await db.execute(text(f"""SELECT u.id, u.nickname, u.phone, u.gender, u.status,
         u.created_at, u.updated_at, a.matchmaker_id,
         v.vip_end_at,
         CASE WHEN v.user_id IS NULL OR (v.vip_end_at IS NOT NULL AND v.vip_end_at <= UTC_TIMESTAMP())
@@ -31,9 +42,9 @@ async def _member(db: AsyncSession, member_id: int) -> MatchmakerMemberAdminItem
         FROM users u
         LEFT JOIN (SELECT user_id, MAX(end_at) vip_end_at FROM user_membership
             WHERE status = 1 GROUP BY user_id) v ON v.user_id = u.id
-        LEFT JOIN (SELECT user_id, matchmaker_id FROM resource_assignment
-            WHERE status = 1) a ON a.user_id = u.id
-        WHERE u.id = :id"""), {"id": member_id})).mappings().first()
+        LEFT JOIN (SELECT user_id, MAX(matchmaker_id) AS matchmaker_id FROM resource_assignment
+            WHERE status = 1 GROUP BY user_id) a ON a.user_id = u.id
+        WHERE u.id = :id AND ({scope})"""), {"id": member_id, **scope_params})).mappings().first()
     if not row:
         raise HTTPException(404, detail="会员不存在")
     return MatchmakerMemberAdminItem(
@@ -50,7 +61,14 @@ async def _member(db: AsyncSession, member_id: int) -> MatchmakerMemberAdminItem
     )
 
 
-async def create_member(db: AsyncSession, body: MatchmakerMemberCreate, actor_id: int) -> MatchmakerMemberAdminItem:
+async def create_member(
+    db: AsyncSession,
+    body: MatchmakerMemberCreate,
+    actor_id: int,
+    *,
+    organization_id: int | None = None,
+    matchmaker_user_id: int | None = None,
+) -> MatchmakerMemberAdminItem:
     duplicate = await db.execute(text("SELECT id FROM users WHERE phone = :phone"), {"phone": body.phone})
     if duplicate.scalar():
         raise HTTPException(409, detail="手机号已注册")
@@ -60,6 +78,17 @@ async def create_member(db: AsyncSession, body: MatchmakerMemberCreate, actor_id
         **body.model_dump(exclude={"remark"}), "phone": body.phone,
     })
     member_id = int(result.lastrowid)
+    # D-4：建档必须同时落归属。否则 SELF / STORE / ORGANIZATION 账号建出的会员
+    # 不属于任何组织或红娘，在 fail-closed 的列表里永远查不到，也无法改派。
+    if organization_id is not None or matchmaker_user_id is not None:
+        await db.execute(text("""INSERT INTO resource_assignment
+            (user_id, organization_id, matchmaker_id, source, assigned_by)
+            VALUES (:user_id, :organization_id, :matchmaker_id, 'manual', :assigned_by)"""), {
+            "user_id": member_id,
+            "organization_id": organization_id,
+            "matchmaker_id": matchmaker_user_id,
+            "assigned_by": actor_id,
+        })
     await db.execute(text("""INSERT INTO matchmaker_admin_member_note
         (user_id, note, updated_by) VALUES (:user_id, :note, :updated_by)"""), {
         "user_id": member_id, "note": body.remark, "updated_by": actor_id,
@@ -70,12 +99,20 @@ async def create_member(db: AsyncSession, body: MatchmakerMemberCreate, actor_id
         "actor": actor_id, "resource_id": member_id, "reason": body.remark,
     })
     await db.commit()
-    return await _member(db, member_id)
+    # 该记录由调用方本人刚创建，回读不叠加作用域，避免归属未即时生效时误判 404。
+    return await _member(db, member_id, "1 = 1", {})
 
 
-async def update_member(db: AsyncSession, member_id: int, body: MatchmakerMemberUpdate, actor_id: int) -> MatchmakerMemberAdminItem:
-    await _member(db, member_id)
+async def update_member(
+    db: AsyncSession, member_id: int, body: MatchmakerMemberUpdate, actor_id: int, *,
+    scope: str, scope_params: dict[str, object],
+) -> MatchmakerMemberAdminItem:
+    await _member(db, member_id, scope, scope_params)
     values = body.model_dump(exclude_unset=True)
+    # 后台表单预填的是掩码值，原样提交会用 ``***`` 覆盖库中真实微信号：掩码形态一律
+    # 丢弃该字段，确实要改必须提交新的完整微信号。
+    if is_masked_value(values.get("wechat")):
+        values.pop("wechat")
     remark = values.pop("remark", None)
     user_values = {key: values.pop(key) for key in ("nickname", "gender", "birthday", "is_married", "avatar") if key in values}
     auth_values = {key: values.pop(key) for key in ("education", "school", "job", "company", "auth_status") if key in values}
@@ -152,16 +189,26 @@ async def update_member(db: AsyncSession, member_id: int, body: MatchmakerMember
         "actor": actor_id, "resource_id": member_id, "reason": remark,
     })
     await db.commit()
-    return await _member(db, member_id)
+    return await _member(db, member_id, scope, scope_params)
 
 
-async def certification_detail(db: AsyncSession, member_id: int, kind: str) -> CertificationDetail:
+async def certification_detail(
+    db: AsyncSession, member_id: int, kind: str, *,
+    scope: str, scope_params: dict[str, object],
+) -> CertificationDetail:
+    """读取单个认证项。
+
+    作用域守卫必须在取数**之前**：``users`` / ``user_auth`` 本身不带归属列，只有先按
+    ``scope`` 命中会员才进入认证材料读取。把 :func:`_member` 放在「查不到」分支里，
+    等于让越权请求先完整读到别人的学历、房产与证件图 URL，只在缺行时才想起鉴权。
+    """
+    await _member(db, member_id, scope, scope_params)
     if kind == "marriage":
         row = (await db.execute(text(
             "SELECT id, is_married, updated_at FROM users WHERE id = :id"
         ), {"id": member_id})).mappings().first()
         if not row:
-            await _member(db, member_id)
+            raise HTTPException(404, detail="会员不存在")
         return CertificationDetail(
             user_id=member_id,
             kind=kind,
@@ -188,7 +235,6 @@ async def certification_detail(db: AsyncSession, member_id: int, kind: str) -> C
         ua.{reviewed_field} AS reviewed_at
         FROM user_auth ua WHERE ua.user_id = :id"""), {"id": member_id})).mappings().first()
     if not row:
-        await _member(db, member_id)
         return CertificationDetail(
             user_id=member_id, kind=kind, status=0, submitted_at=None, reviewed_at=None,
             fail_reason=None, value=None, material_urls=[], reviewer_id=None, audit_history=[],
@@ -204,8 +250,10 @@ async def certification_detail(db: AsyncSession, member_id: int, kind: str) -> C
     )
 
 
-async def member_audit_logs(db: AsyncSession, member_id: int) -> list[MemberAuditLogItem]:
-    await _member(db, member_id)
+async def member_audit_logs(
+    db: AsyncSession, member_id: int, *, scope: str, scope_params: dict[str, object],
+) -> list[MemberAuditLogItem]:
+    await _member(db, member_id, scope, scope_params)
     result = await db.execute(text("""SELECT id, action, resource_type, resource_id, reason, created_at
         FROM business_audit_log WHERE resource_type = 'user' AND resource_id = :id
         ORDER BY id DESC LIMIT 200"""), {"id": member_id})

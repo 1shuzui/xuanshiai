@@ -72,9 +72,9 @@ CONSENT_PRODUCER_DIMENSIONS: tuple[dict[str, str], ...] = (
 PRODUCER_RETRY_EVENT_TYPE = "memory_projection_producer"
 
 _SQL_ACTIVE_CONSENT_READ = (
-    "SELECT scope, version, policy_revision, granted_at FROM ai_consent_grant "
+    "SELECT id AS grant_id, scope, version, policy_revision, granted_at FROM ai_consent_grant "
     "WHERE user_id = :user_id AND scope = :scope AND revoked_at IS NULL "
-    "ORDER BY granted_at DESC LIMIT 1"
+    "ORDER BY id DESC LIMIT 1"
 )
 _SQL_ACTIVE_GRANT_SCAN = (
     "SELECT grant_id, function_key, purpose, data_category FROM "

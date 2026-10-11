@@ -50,13 +50,16 @@ from app.services.ai.profile import (
     ProfileSessionNotFound,
     ProfileSessionStale,
     ProfileTurn,
+    _entry_digest_with_keys,
     _insert_turn,
+    _load_revision_fields,
     find_turn_by_client_id,
     hash_request,
     load_owned_active_session,
     moderate_text,
     normalize_profile_answer,
 )
+from app.services.profile import get_profile
 from app.services.ai.tasks import AiTaskRecord, enqueue_task, fail_task
 from app.services.revisions import RevisionVector
 
@@ -97,7 +100,8 @@ class JourneyInvite:
 
 
 def _safe_payload(
-    *, session_id: str, turn_id: str, client_turn_id: str, subject: str
+    *, session_id: str, turn_id: str, client_turn_id: str, subject: str,
+    flow_version: str = "legacy",
 ) -> str:
     """Return task metadata without user text or provider payloads."""
     return json.dumps(
@@ -106,9 +110,11 @@ def _safe_payload(
             "turn_id": turn_id,
             "client_turn_id": client_turn_id,
             "subject": subject,
+            "flow_version": flow_version,
         },
         ensure_ascii=False,
     )
+
 
 
 def journey_task_key(session_id: str, client_turn_id: str) -> str:
@@ -123,6 +129,7 @@ async def submit_journey_turn(
     owner_user_id: int,
     client_turn_id: str,
     answer_text: str,
+    flow_version: str = "legacy",
 ) -> JourneyTurnSubmission:
     """Persist one final turn and enqueue the dedicated candidate task.
 
@@ -132,7 +139,10 @@ async def submit_journey_turn(
     turn or candidate task.
     """
     normalized = normalize_profile_answer(answer_text)
-    session = await load_owned_active_session(db, session_id, owner_user_id)
+    session = await load_owned_active_session(
+        db, session_id, owner_user_id,
+        **({"continuous": True} if flow_version == "continuous_v2" else {}),
+    )
     existing = await find_turn_by_client_id(db, session_id, client_turn_id)
     digest = hash_request(session_id, client_turn_id, normalized)
     task_key = journey_task_key(session_id, client_turn_id)
@@ -200,6 +210,7 @@ async def submit_journey_turn(
                 turn_id=turn.turn_id,
                 client_turn_id=client_turn_id,
                 subject=session.subject.value,
+                flow_version=(flow_version if flow_version == "continuous_v2" else "legacy"),
             ),
             "task_id": task.task_id,
         },
@@ -310,8 +321,12 @@ async def _enforce_entry_dimension_cap(db: AsyncSession, session_id: str) -> int
     """Dismiss active entry candidates beyond the per-dimension cap (#12).
 
     Keeps the ``MAX_ACTIVE_ENTRIES_PER_DIMENSION`` highest-confidence rows per
-    dimension (ties broken by recency, then id) and moves the rest to the
-    terminal ``dismissed`` status.  Returns the number of dismissed rows.
+    *subject and* dimension (ties broken by recency, then id) and moves the
+    rest to the terminal ``dismissed`` status.  Returns the number of
+    dismissed rows.
+
+    同一会话同时承载 personal 与 ideal_partner：只按维度分组会让两个主体互相
+    挤掉候选，因此上限按主体独立计算。
     """
     result = await db.execute(
         text(
@@ -320,7 +335,7 @@ async def _enforce_entry_dimension_cap(db: AsyncSession, session_id: str) -> int
             "  SELECT candidate_id FROM ("
             "    SELECT candidate_id, "
             "           ROW_NUMBER() OVER ("
-            "             PARTITION BY profile_dimension "
+            "             PARTITION BY subject, profile_dimension "
             "             ORDER BY confidence DESC, updated_at DESC, id DESC"
             "           ) AS rn "
             "    FROM ai_profile_candidate "
@@ -381,6 +396,110 @@ def _existing_candidates_digest(candidates: tuple[CandidateRecord, ...]) -> str:
         lines.append(f"- [{label}] {detail}")
     return "\n".join(lines)
 
+async def _continuous_entry_targets(
+    db: AsyncSession, owner_user_id: int, subjects: tuple[str, ...]
+) -> tuple[str | None, dict[str, frozenset[str]], dict[str, dict[str, dict[str, Any]]]]:
+    """当前授权下双主体正式条目：摘要、合法 key 与内容索引使用同一过滤源。"""
+    from app.services.ai.continuous import _latest_revision, _revision_fields
+    digest_lines: list[str] = []
+    keys_by_subject: dict[str, frozenset[str]] = {}
+    rows_by_subject: dict[str, dict[str, dict[str, Any]]] = {}
+    for subject in subjects:
+        revision = await _latest_revision(db, owner_user_id, subject)
+        rows = [row for row in await _revision_fields(db, int(revision["id"]) if revision else None)
+                if row.get("field_kind") == "entry" and str(row.get("content") or "").strip()]
+        digest = _entry_digest_with_keys(rows)
+        keys_by_subject[subject] = frozenset(
+            str(row.get("field_key")) for row in rows if str(row.get("field_key") or "")
+        )
+        rows_by_subject[subject] = {
+            str(row.get("field_key")): dict(row)
+            for row in rows
+            if str(row.get("field_key") or "")
+        }
+        if digest:
+            # 双主体共用一次抽取：每行加主体前缀，模型据此选对主体目标。
+            label = "个人画像" if subject == "personal" else "理想型画像"
+            digest_lines.append("\n".join(f"[{label}] {line}" for line in digest.splitlines()))
+    return ("\n".join(digest_lines) or None), keys_by_subject, rows_by_subject
+
+
+def _replaced_entry_pairs(
+    candidates: tuple[CandidateRecord, ...],
+    published_by_key: dict[str, dict[str, Any]],
+) -> tuple[tuple[str, str], ...]:
+    """本次被替换的正式条目：(旧 field_key, 旧 content_hash)。
+
+    只对带替换目标的 entry 候选生效；content_hash 用发布行的内容按 entry 语义
+    重算，与旧 active 候选的 content_hash 可直接比较。
+    """
+    pairs: list[tuple[str, str]] = []
+    for candidate in candidates:
+        if candidate.field_kind != "entry" or not candidate.field_key:
+            continue
+        row = published_by_key.get(str(candidate.field_key))
+        if row is None:
+            continue
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        content_hash = compute_candidate_content_hash(
+            candidate.subject, "entry", None, row.get("category"), None, content
+        )
+        pairs.append((str(candidate.field_key), content_hash))
+    return tuple(dict.fromkeys(pairs))
+
+
+async def _dismiss_replaced_entry_candidates(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    subject: str,
+    replaced: tuple[tuple[str, str], ...],
+    retained_hashes: frozenset[str] = frozenset(),
+) -> int:
+    """淘汰同主体、同目标的旧 active 修订（含未确认版本），保留审计行。
+
+    无目标 key 的正式原值按内容定位；带目标的中间版本按目标定位。
+    本次明确抽取的版本不淘汰，legacy 不调用此链路。
+    """
+    hashes = sorted({content_hash for _, content_hash in replaced})
+    if not hashes:
+        return 0
+    placeholders = ", ".join(f":hash_{idx}" for idx in range(len(hashes)))
+    targets = sorted({field_key for field_key, _ in replaced})
+    target_placeholders = ", ".join(f":target_{idx}" for idx in range(len(targets)))
+    keep_placeholders = ", ".join(f":keep_{idx}" for idx in range(len(retained_hashes)))
+    keep_clause = f" AND content_hash NOT IN ({keep_placeholders})" if retained_hashes else ""
+    params: dict[str, Any] = {
+        "user_id": owner_user_id,
+        "subject": subject,
+        **{f"hash_{idx}": value for idx, value in enumerate(hashes)},
+        **{f"target_{idx}": value for idx, value in enumerate(targets)},
+        **{f"keep_{idx}": value for idx, value in enumerate(sorted(retained_hashes))},
+    }
+    result = await db.execute(
+        text(
+            "UPDATE ai_profile_candidate SET status = 'dismissed', "
+            "updated_at = UTC_TIMESTAMP() "
+            "WHERE user_id = :user_id AND subject = :subject "
+            "AND field_kind = 'entry' AND status = 'active' "
+            f"AND (field_key IN ({target_placeholders}) OR "
+            f"(field_key IS NULL AND content_hash IN ({placeholders})))"
+            f"{keep_clause}"
+        ),
+        params,
+    )
+    dismissed = int(result.rowcount or 0)
+    if dismissed:
+        logger.info(
+            "moxiang_replaced_entry_candidates_dismissed user_id=%s subject=%s count=%d",
+            owner_user_id,
+            subject,
+            dismissed,
+        )
+    return dismissed
+
 
 def _structured_display_value(value: Any) -> str:
     """Render a structured field value for user-facing display.
@@ -406,6 +525,85 @@ _HARD_PROFILE_FIELDS = (
 )
 
 
+async def _session_user_id(db: AsyncSession, session_id: str) -> int | None:
+    """按会话 ID 取属主 user_id；会话不存在/已失效时返回 None。"""
+    result = await db.execute(
+        text("SELECT user_id FROM ai_profile_session WHERE session_id = :session_id"),
+        {"session_id": session_id},
+    )
+    row = result.mappings().first()
+    if row is None or row.get("user_id") is None:
+        return None
+    return int(row["user_id"])
+
+
+async def _latest_revision_id(
+    db: AsyncSession, user_id: int, subject: str
+) -> int | None:
+    """当前主体最新一次已发布画像 revision；从未发布过返回 None。"""
+    result = await db.execute(
+        text(
+            "SELECT id FROM ai_profile_revision "
+            "WHERE user_id = :user_id AND subject = :subject "
+            "ORDER BY revision_no DESC, id DESC LIMIT 1"
+        ),
+        {"user_id": user_id, "subject": subject},
+    )
+    row = result.mappings().first()
+    return int(row["id"]) if row is not None and row.get("id") is not None else None
+
+
+def _revision_fields_digest(rows: list[dict[str, Any]]) -> str:
+    """把已发布画像字段行渲染成与候选摘要同构的紧凑清单。
+
+    结构化字段显示 ``field_key = 显示值``；条目显示 ``category：content``。
+    只做展示渲染，不做任何状态判断。
+    """
+    lines: list[str] = []
+    for row in rows[:40]:
+        field_key = str(row.get("field_key") or "")
+        if not field_key:
+            continue
+        if str(row.get("field_kind") or "structured") == "structured":
+            detail = f"{field_key} = {str(row.get('display_value') or row.get('value_json') or '')}"
+        else:
+            content = str(row.get("content") or "").strip().replace("\n", " ")
+            if len(content) > 40:
+                content = content[:40] + "…"
+            detail = f"{str(row.get('category') or '')}：{content}"
+        lines.append(f"- {detail}")
+    return "\n".join(lines)
+
+
+def _profile_hard_field_presence(profile: dict[str, Any]) -> set[str]:
+    """把正式资料映射到硬字段的"已填写"集合；只判存在，不做值转换。
+
+    ``is_married`` 0 表示未知（存储域注释），不算已填写。
+    """
+    present: set[str] = set()
+
+    def filled(key: str) -> bool:
+        value = profile.get(key)
+        return value is not None and str(value).strip() != ""
+
+    if filled("age"):
+        present.add("age")
+    if filled("residence_city_code"):
+        present.add("city_code")
+    marriage = profile.get("is_married")
+    if marriage is not None and int(marriage) >= 1:
+        present.add("marriage_status")
+    if filled("education_level"):
+        present.add("education_level")
+    if filled("height"):
+        present.add("height_cm")
+    if filled("income"):
+        present.add("income_band")
+    if filled("occupation"):
+        present.add("occupation_group")
+    return present
+
+
 async def compose_journey_build_context(
     db: AsyncSession, *, session_id: str, subject: str
 ) -> str:
@@ -414,6 +612,11 @@ async def compose_journey_build_context(
     Reads the session's active/promoted candidates and projects them into the
     independent system segment the master prompt injects, so the conversation
     steers toward what is still unknown instead of re-asking settled facts.
+
+    R4：缺失判断与"已确认"描述不再只看本会话候选。三个真实来源按各自含义
+    使用——本人正式资料与当前主体已发布画像字段用于抑制重复采集；本会话
+    候选保持"待核对"语义，不冒充已确认事实。读不到资料时保留可用状态
+    （只按候选判断），不能把所有字段当成空并重新采集。
     """
     candidates = await list_session_candidates(
         db, session_id=session_id, active_only=False
@@ -437,6 +640,30 @@ async def compose_journey_build_context(
         if progress.dimensions[dim].evidence_count < 2
     ]
     steering_hooks = steering_hook_lines(blank_dimensions, subject=subject)
+    confirmed_present: set[str] = set()
+    confirmed_summary = ""
+    profile_present: set[str] = set()
+    user_id = await _session_user_id(db, session_id)
+    if user_id is not None:
+        revision_id = await _latest_revision_id(db, user_id, subject)
+        if revision_id is not None:
+            revision_rows = await _load_revision_fields(db, revision_id)
+            confirmed_summary = _revision_fields_digest(revision_rows)
+            confirmed_present = {
+                str(row.get("field_key") or "")
+                for row in revision_rows
+                if str(row.get("field_kind") or "structured") == "structured"
+            }
+            confirmed_present.discard("")
+        if subject == "personal":
+            try:
+                profile = await get_profile(db, user_id)
+                profile_present = _profile_hard_field_presence(profile)
+            except Exception:  # noqa: BLE001 — 资料读取失败不等于资料为空
+                logger.warning(
+                    "journey build context: profile load failed for user %s",
+                    user_id,
+                )
     missing_hard: list[str] = []
     if subject == "personal":
         present = {
@@ -444,8 +671,14 @@ async def compose_journey_build_context(
             for candidate in usable
             if candidate.field_kind == "structured"
         }
-        missing_hard = [key for key in _HARD_PROFILE_FIELDS if key not in present]
-    confirmed_summary = _existing_candidates_digest(usable)
+        missing_hard = [
+            key
+            for key in _HARD_PROFILE_FIELDS
+            if key not in present
+            and key not in confirmed_present
+            and key not in profile_present
+        ]
+    pending_summary = _existing_candidates_digest(usable)
     return build_build_context(
         missing_hard,
         confirmed_summary,
@@ -453,7 +686,79 @@ async def compose_journey_build_context(
         subject=subject,
         dimension_lines=dimension_lines,
         steering_hooks=steering_hooks,
+        pending_summary=pending_summary,
     )
+
+async def compose_continuous_context(
+    db: AsyncSession, *, user_id: int, session_id: str | None = None
+) -> str:
+    """组合 continuous_v2 回复上下文，不把候选误说成已确认事实。
+
+    上下文固定包含两主体正式稿、本人基础资料、近期本人历史和待核对候选。
+    每个来源独立容错；读取失败会显式标记为暂不可用，绝不当成空白从而诱发
+    重复提问或丢失已有理解。
+    """
+    from app.services.ai.continuous import (
+        _candidates, _latest_revision, _require_consent, _revision_fields,
+        list_continuous_turns,
+    )
+
+    # 授权检查不能容错成空上下文；重授权不会恢复已撤回的历史与候选。
+    consent = await _require_consent(db, user_id)
+    parts: list[str] = [
+        "连续对话上下文（仅供知遇保持连续，不是用户本轮新证据）：",
+        "正式画像、基础资料和历史读取失败时，不得假设用户从未提供过；应避免重复追问，必要时温和说明正在恢复。",
+    ]
+    for subject, label in (("personal", "本人的正式画像"), ("ideal_partner", "伴侣偏好的正式画像")):
+        try:
+            revision = await _latest_revision(db, user_id, subject)
+            if revision is None:
+                parts.append(f"{label}：暂无已确认内容。")
+            else:
+                rows = await _revision_fields(db, int(revision["id"]))
+                parts.append(f"{label}（已确认）：\n{_revision_fields_digest(rows) or '当前版本无可展示字段。'}")
+        except Exception:  # noqa: BLE001 - 上下文失败必须显式保留
+            logger.warning("continuous_context_revision_failed subject=%s", subject)
+            parts.append(f"{label}：读取失败，不能当作空白。")
+    try:
+        profile = await get_profile(db, user_id)
+        base_lines = [
+            f"- 年龄：{profile.get('age')}",
+            f"- 所在城市：{profile.get('residence_city_code')}",
+            f"- 婚姻状态：{profile.get('is_married')}",
+            f"- 学历：{profile.get('education_level')}",
+            f"- 职业：{profile.get('occupation')}",
+        ]
+        rendered = [line for line in base_lines if not line.endswith("：None")]
+        parts.append("基础资料（仅作背景）：\n" + ("\n".join(rendered) or "暂无可展示字段。"))
+    except Exception:  # noqa: BLE001 - 不将读取失败伪装为空
+        logger.warning("continuous_context_profile_failed user_id=%s", user_id)
+        parts.append("基础资料：读取失败，不能当作空白。")
+    try:
+        history, _ = await list_continuous_turns(db, user_id, 12)
+        history_lines = [
+            f"{'用户' if str(row.get('role')) == 'user' else '知遇'}：{str(row.get('answer_text') or '').strip()}"
+            for row in history if str(row.get("answer_text") or "").strip()
+        ]
+        parts.append("近期本人对话历史（仅作参考）：\n" + ("\n".join(history_lines) or "暂无可展示记录。"))
+    except Exception:  # noqa: BLE001 - 失败不可伪装成无历史
+        logger.warning("continuous_context_history_failed user_id=%s", user_id)
+        parts.append("近期本人对话历史：读取失败，不能当作用户从未说过。")
+    try:
+        pending = []
+        for subject in ("personal", "ideal_partner"):
+            pending.extend(await _candidates(db, user_id, subject, consent))
+        pending_lines: list[str] = []
+        for row in pending:
+            subject = str(row.get("subject") or "")
+            detail = str(row.get("content") or row.get("value_json") or "").strip()
+            if detail:
+                pending_lines.append(f"- [{subject}] {detail[:200]}")
+        parts.append("待核对候选（不能作为已确认事实）：\n" + ("\n".join(pending_lines[:40]) or "暂无。"))
+    except Exception:  # noqa: BLE001 - 候选失败也要显式保留
+        logger.warning("continuous_context_candidates_failed user_id=%s", user_id)
+        parts.append("待核对候选：读取失败，不能当作暂无候选。")
+    return "\n\n".join(parts)
 
 
 def _shadow_source_kind(assertion_mode: str) -> str:
@@ -477,6 +782,9 @@ def _assertion_mode_by_content_hash(
 
     mapping: dict[str, str] = {}
     for item in (*result.fields, *result.entries, *result.patches):
+        item_subject = getattr(item, "subject", None)
+        if getattr(item_subject, "value", item_subject) != subject:
+            continue
         is_structured = hasattr(item, "field_key")
         field_key = getattr(item, "field_key", None)
         category = getattr(item, "category", None)
@@ -557,7 +865,7 @@ async def _shadow_write_candidate_memory(
 async def extract_journey_candidates(
     db: AsyncSession, task: AiTaskRecord, worker_id: str
 ) -> tuple[str, RevisionVector] | None:
-    """Worker handler: turn -> active candidate pool, never draft fields."""
+    """Worker：一次抽取落双主体候选；新版各主体独立尝试冻结成稿。"""
     payload = task.payload_summary or {}
     session_id = str(payload.get("session_id") or "")
     turn_id = str(payload.get("turn_id") or "")
@@ -569,7 +877,10 @@ async def extract_journey_candidates(
         )
         return None
     try:
-        session = await load_owned_active_session(db, session_id, task.owner_user_id)
+        session = await load_owned_active_session(
+            db, session_id, task.owner_user_id,
+            **({"continuous": True} if payload.get("flow_version") == "continuous_v2" else {}),
+        )
         turn = await find_turn_by_client_id(db, session_id, client_turn_id)
     except (AIConsentRequired, ProfileSessionNotFound, ProfileSessionStale):
         # 只有授权/会话终态才是不可重试的语义。瞬时 DB 故障放行给 worker
@@ -598,16 +909,30 @@ async def extract_journey_candidates(
         input_revision=task.source_revision_json or {},
         policy_revision=session.policy_revision or PROFILE_POLICY_REVISION,
     )
+    flow_version = str(payload.get("flow_version") or "legacy")
+    continuous_v2 = flow_version == "continuous_v2"
     active_candidates = await list_session_candidates(
         db, session_id=session_id, active_only=True
     )
+    # continuous_v2 的 master 抽取要能定位「改成哪一条」：下发双主体正式稿条目
+    # 摘要（含 field_key）并记住合法目标；legacy 不加载、不下发，行为零变化。
+    entry_digest: str | None = None
+    entry_keys: dict[str, frozenset[str]] = {}
+    entry_rows: dict[str, dict[str, dict[str, Any]]] = {}
+    if continuous_v2:
+        entry_digest, entry_keys, entry_rows = await _continuous_entry_targets(
+            db, task.owner_user_id, ("personal", "ideal_partner")
+        )
     request = StructuredExtractRequest(
         subject=session.subject.value,
         turn_texts=(turn.answer_text,),
         consent_version=session.consent_version,
         policy_revision=session.policy_revision or PROFILE_POLICY_REVISION,
         session_kind="master",
+        entry_digest=entry_digest,
         existing_digest=_existing_candidates_digest(active_candidates) or None,
+        continuous_v2=continuous_v2,
+        subjects=("personal", "ideal_partner") if continuous_v2 else (session.subject.value,),
     )
     outcome = await AIGateway(
         timeout_seconds=settings.ai_gateway_timeout_seconds
@@ -624,17 +949,27 @@ async def extract_journey_candidates(
     try:
         if outcome.result.schema_version != PROFILE_SCHEMA_VERSION:
             raise ValueError("provider result schema version does not match")
-        extracted = candidates_from_master_result(
-            subject=session.subject.value,
-            result=outcome.result,
-            consent_version=session.consent_version,
-            policy_revision=session.policy_revision or PROFILE_POLICY_REVISION,
-            source_turn_id=turn.turn_id,
-        )
+        subjects = ("personal", "ideal_partner") if continuous_v2 else (session.subject.value,)
+        extracted_by_subject: dict[str, tuple[CandidateRecord, ...]] = {}
+        for candidate_subject in subjects:
+            result = outcome.result.model_copy(update={
+                "fields": tuple(x for x in outcome.result.fields if x.subject.value == candidate_subject),
+                "entries": tuple(x for x in outcome.result.entries if x.subject.value == candidate_subject),
+                "patches": tuple(x for x in outcome.result.patches if x.subject.value == candidate_subject),
+                "clarifying_question": None,
+            }) if continuous_v2 else outcome.result
+            extracted_by_subject[candidate_subject] = candidates_from_master_result(
+                subject=candidate_subject,
+                result=result,
+                consent_version=session.consent_version,
+                policy_revision=session.policy_revision or PROFILE_POLICY_REVISION,
+                source_turn_id=turn.turn_id,
+                owned_source_turn_ids=(turn.turn_id,),
+                replaceable_entry_keys=(
+                    entry_keys.get(candidate_subject) if continuous_v2 else None
+                ),
+            )
     except (AttributeError, TypeError, ValueError) as exc:
-        # 单条候选违规会让整轮抽取失败，但根因是供应商输出漂移（dots 抖动），
-        # 重试很可能成功：留痕后放行给 worker 边界转成可重试失败，不再把用户
-        # 这一轮的有效证据永久丢弃（旧行为 retryable=False 等于整轮陪葬）。
         logger.warning(
             "moxiang_candidate_result_rejected task_id=%s prompt_version=%s error=%s",
             task.task_id,
@@ -642,24 +977,55 @@ async def extract_journey_candidates(
             type(exc).__name__,
         )
         raise
-    assertion_modes = _assertion_mode_by_content_hash(outcome.result, session.subject.value)
-    for item in extracted:
-        candidate = replace(
-            item,
-            candidate_id=uuid.uuid4().hex,
-            session_id=session.session_id,
-            user_id=task.owner_user_id,
-        )
-        await _upsert_candidate(db, candidate, source_turn_id=turn.turn_id)
-        # Shadow Write：候选 upsert 成功后沉淀记忆事件；失败不阻塞旧链路。
-        await _shadow_write_candidate_memory(
-            db,
-            candidate,
-            assertion_mode=assertion_modes.get(candidate.content_hash, "inferred"),
-            source_turn_id=turn.turn_id,
-        )
-    # #12：本轮 upsert 后统一裁剪，保证任一维度的活跃 entry 证据不超上限。
+    for candidate_subject, extracted in extracted_by_subject.items():
+        assertion_modes = _assertion_mode_by_content_hash(outcome.result, candidate_subject)
+        for item in extracted:
+            candidate = replace(
+                item,
+                candidate_id=uuid.uuid4().hex,
+                session_id=session.session_id,
+                user_id=task.owner_user_id,
+            )
+            await _upsert_candidate(db, candidate, source_turn_id=turn.turn_id)
+            await _shadow_write_candidate_memory(
+                db,
+                candidate,
+                assertion_mode=assertion_modes.get(candidate.content_hash, "inferred"),
+                source_turn_id=turn.turn_id,
+            )
+    if continuous_v2:
+        for candidate_subject, extracted in extracted_by_subject.items():
+            replaced_pairs = _replaced_entry_pairs(
+                extracted, entry_rows.get(candidate_subject, {})
+            )
+            if replaced_pairs:
+                await _dismiss_replaced_entry_candidates(
+                    db,
+                    owner_user_id=task.owner_user_id,
+                    subject=candidate_subject,
+                    replaced=replaced_pairs,
+                    retained_hashes=frozenset(item.content_hash for item in extracted),
+                )
     await _enforce_entry_dimension_cap(db, session.session_id)
+    if continuous_v2:
+        from app.services.ai.continuous import build_continuous_draft
+
+        for candidate_subject in ("personal", "ideal_partner"):
+            try:
+                await build_continuous_draft(
+                    db,
+                    task.owner_user_id,
+                    candidate_subject,
+                    refresh=False,
+                    idempotency_key=f"continuous-auto:{task.task_id}:{candidate_subject}",
+                )
+            except LookupError:
+                # 尚未达到该主体的冻结门槛；候选已经落库，不能丢失。
+                logger.info(
+                    "continuous_draft_not_ready task_id=%s subject=%s",
+                    task.task_id,
+                    candidate_subject,
+                )
     return f"moxiang-candidate:{task.task_id}", session.revision_vector
 
 

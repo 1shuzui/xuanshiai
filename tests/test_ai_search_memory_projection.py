@@ -34,6 +34,8 @@ pytestmark = pytest.mark.asyncio
 
 def _legacy_consent() -> dict[str, Any]:
     return {
+        # R5：legacy 校验链同样要求快照绑定持久 grant 代际。
+        "grant_id": "grant-501",
         "scope": "profile_text_extract",
         "version": "profile-text-v1",
         "policy_revision": "ai-policy-2026-08-07-v1",

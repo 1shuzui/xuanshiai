@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROUTE = REPO_ROOT / "app" / "api" / "routes" / "voice_moxiang.py"
@@ -93,3 +95,53 @@ def test_profile_extract_no_longer_has_a_master_draft_branch() -> None:
 
     assert "AI_LEGACY_MOXIANG_RETIRED" in branch
     assert "_handle_master_extract" not in branch
+
+
+async def _noop(*args, **kwargs):
+    return None
+
+
+@pytest.mark.asyncio
+async def test_revise_text_executes_real_branch_with_required_reply_signature() -> None:
+    """执行真实 revise_text 分支；用真实签名绑定，不能让 **kwargs 放过漏参。"""
+    import ast
+    import inspect
+    from types import SimpleNamespace
+
+    from app.api.routes import voice_moxiang
+
+    tree = ast.parse(ROUTE.read_text(encoding="utf-8"))
+    branch = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
+                  and ast.unparse(node.test) == "msg_type == 'revise_text'")
+    signature = inspect.signature(voice_moxiang._push_streamed_reply)
+    calls = []
+
+    async def strict_reply(*args, **kwargs):
+        bound = signature.bind(*args, **kwargs)
+        calls.append(bound.arguments)
+
+    wrapper = ast.AsyncFunctionDef(
+        name="execute_revise", args=ast.arguments(posonlyargs=[], args=[], kwonlyargs=[],
+                                                kw_defaults=[], defaults=[]),
+        body=[ast.While(test=ast.Constant(True), body=[*branch.body, ast.Break()], orelse=[])],
+        decorator_list=[],
+    )
+    module = ast.fix_missing_locations(ast.Module(body=[wrapper], type_ignores=[]))
+    bumps = []
+    ws = object()
+    orchestrator = SimpleNamespace(bump_generation=lambda: bumps.append(True))
+    env = {
+        "message": {"text": "修订为更重视沟通"}, "ws": ws, "orchestrator": orchestrator,
+        "active_subject": "ideal_partner", "journey_active": False,
+        "continuous_v2_active": True, "sessions_by_subject": {},
+        "_db_session_factory": None, "request_id": "current-ws-request",
+        "user_id": 42, "poll_tasks": set(), "_push_streamed_reply": strict_reply,
+        "_journey_build_context": _noop, "_finish_journey_turn": _noop,
+    }
+    exec(compile(module, str(ROUTE), "exec"), env)
+    await env["execute_revise"]()
+    assert bumps == [True] and len(calls) == 1
+    assert calls[0]["request_id"] == "current-ws-request"
+    assert calls[0]["user_text"] == "修订为更重视沟通"
+    assert calls[0]["subject"] == "ideal_partner"
+    assert calls[0]["flow_version"] == "continuous_v2"
