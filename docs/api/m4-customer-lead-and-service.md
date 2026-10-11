@@ -211,7 +211,33 @@
 - Schema：`app/schemas/customer_lead_admin.py`
 - Service：`app/services/customer_lead_admin.py`（`list_leads`/`create_lead`/`update_lead`/`get_lead`/`assign_lead`/`add_follow_up`/`list_follow_ups`/`lead_statistics`/`abandon_lead`/`restore_lead`/`list_abandonments`/`batch_import_leads`/`_insert_leads`/`import_leads_file`/`build_import_template`/`parse_import_file`/`lead_options`/`_sync_tags`）
 
----
+### 2.17 一键入库 `POST /api/v1/admin/customer-leads/{lead_id}/convert`
+
+**权限**：红娘后台 Token，权限点 `customer_lead.manage`。
+
+**请求体**：
+
+```json
+{"gender": 2, "remark": "高意向线索，已电话确认"}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---:|---|
+| `lead_id` | path integer | 是 | 客源线索 ID |
+| `gender` | body integer/null | 否 | `1` 男、`2` 女；用于创建会员基础资料 |
+| `remark` | body string/null | 否 | 后台备注，最多 500 字 |
+
+**成功响应**：`200`，返回 `lead`（状态为 `CONVERTED` 且包含 `converted_user_id`）、`user_id`、`review_status: "PENDING"`、`replayed`。不返回密码；生成的会员通过手机号验证码登录。
+
+**业务规则**：
+
+- 线索必须有手机号；`LOST`、`CLOSED`、已经入库但没有有效 `converted_user_id` 的线索返回 `409`。
+- 已经有 `converted_user_id` 的重复请求返回原会员，不重复创建用户，`replayed=true`。
+- 如果手机号已经属于其它会员，返回 `409`，不自动合并账号。
+- 转换在一个数据库事务中完成：创建用户、补普通用户角色、写公开资料待审记录、写资源归属、更新客源状态和写审计日志；失败时回滚。
+- 会员手机号被标记为已验证，但不生成或返回密码；用户应使用手机号验证码登录。
+
+**错误**：未登录 `401`；无权限 `403`；参数错误 `422`；线索不存在 `404`；状态、手机号或手机号重复 `409`；数据库失败 `500`。
 
 ## 三、会员服务·约见/约会（13 端点）
 

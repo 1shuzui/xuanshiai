@@ -19,6 +19,7 @@ from openpyxl import Workbook, load_workbook
 
 from app.main import app
 from app.schemas.meeting import MeetingDirectCreate, MeetingRecordResponse, MeetingStatistics
+from app.schemas.customer_lead_admin import CustomerLeadConvertRequest, CustomerLeadConvertResult
 from app.schemas.promotion_order_admin import PromotionOrderUpdate
 from app.services import customer_lead_admin as lead_service
 
@@ -37,6 +38,7 @@ def test_customer_lead_new_routes_registered() -> None:
     assert "get" in spec["paths"][f"{LEAD_BASE}/import-template"]
     assert "post" in spec["paths"][f"{LEAD_BASE}/import"]
     assert "get" in spec["paths"][f"{LEAD_BASE}/options"]
+    assert "post" in spec["paths"][f"{LEAD_BASE}/{{lead_id}}/convert"]
 
 
 def test_meeting_new_routes_registered() -> None:
@@ -58,6 +60,7 @@ def test_promotion_order_routes_registered() -> None:
 def test_new_endpoints_require_authentication() -> None:
     assert client.get(f"{LEAD_BASE}/import-template").status_code == 401
     assert client.get(f"{LEAD_BASE}/options").status_code == 401
+    assert client.post(f"{LEAD_BASE}/1/convert", json={}).status_code == 401
     assert client.get(f"{MEETING_BASE}/statistics").status_code == 401
     assert client.post(f"{MEETING_BASE}", json={}).status_code == 401
     assert client.get(PROMO_BASE).status_code == 401
@@ -149,9 +152,53 @@ def test_meeting_record_response_has_new_fields() -> None:
         assert name in fields, f"MeetingRecordResponse 缺 {name}"
 
 
+
+
 def test_meeting_statistics_defaults_zero() -> None:
     stats = MeetingStatistics()
     assert stats.model_dump() == {
         "total_arranged": 0, "total_met": 0, "month_arranged": 0,
         "month_waiting": 0, "month_met": 0, "month_not_met": 0,
     }
+
+
+def test_customer_lead_convert_schema() -> None:
+    body = CustomerLeadConvertRequest(gender=2, remark="高意向")
+    assert body.gender == 2
+    assert body.remark == "高意向"
+    from datetime import datetime, timezone
+
+    result = CustomerLeadConvertResult(
+        lead={
+            "id": 1,
+            "name": "测试客源",
+            "phone": "13800000001",
+            "wechat": None,
+            "source": "测试",
+            "intention_level": 2,
+            "status": "CONVERTED",
+            "matchmaker_id": None,
+            "organization_id": None,
+            "promoter_id": None,
+            "tags": [],
+            "next_follow_at": None,
+            "converted_user_id": 10,
+            "remark": None,
+            "created_by": 1,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        },
+        user_id=10,
+    )
+    assert result.review_status == "PENDING"
+    assert result.replayed is False
+
+
+def test_customer_lead_convert_schema_rejects_invalid_gender() -> None:
+    with pytest.raises(ValueError):
+        CustomerLeadConvertRequest(gender=3)
+
+
+def test_customer_lead_convert_schema_rejects_long_remark() -> None:
+    with pytest.raises(ValueError):
+        CustomerLeadConvertRequest(remark="x" * 501)

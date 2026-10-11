@@ -15,7 +15,7 @@ from app.core.sensitive_fields import REDACTION_LEVEL_STANDARD, is_masked_value,
 
 from app.schemas.customer_lead_admin import (
     CustomerLead, CustomerLeadAbandonment, CustomerLeadAssignment, CustomerLeadCreate, CustomerLeadFollowUp,
-    CustomerLeadBatchImportResult, CustomerLeadFollowUpCreate, CustomerLeadImportRow, CustomerLeadImportSummary,
+    CustomerLeadBatchImportResult, CustomerLeadConvertRequest, CustomerLeadFollowUpCreate, CustomerLeadImportRow, CustomerLeadImportSummary,
     CustomerLeadOption, CustomerLeadOptions,
     CustomerLeadPage, CustomerLeadStatistics, CustomerLeadUpdate,
 )
@@ -101,6 +101,66 @@ async def get_lead(db: AsyncSession, lead_id: int, redaction_level: str = REDACT
     if not row:
         raise HTTPException(404, detail="客源线索不存在")
     return _lead(row, redaction_level)
+
+
+async def convert_lead(
+    db: AsyncSession,
+    account_id: int,
+    organization_id: int | None,
+    matchmaker_user_id: int | None,
+    lead_id: int,
+    request: CustomerLeadConvertRequest,
+) -> tuple[CustomerLead, int, bool]:
+    """Convert one admin lead into a pending member review atomically."""
+    await db.execute(text("SELECT id FROM customer_lead WHERE id = :id FOR UPDATE"), {"id": lead_id})
+    lead = await get_lead(db, lead_id, "full")
+    if lead.converted_user_id:
+        return lead, lead.converted_user_id, True
+    if lead.status in ("LOST", "CLOSED", "CONVERTED"):
+        raise HTTPException(409, detail="当前状态的客源不能入库")
+    phone = normalize_contact(await _raw_contact(db, lead_id, "phone"))
+    if not phone:
+        raise HTTPException(409, detail="线索未登记手机号，无法生成账号，请先补充电话")
+    existing = await db.execute(text("SELECT id FROM users WHERE phone = :phone LIMIT 1"), {"phone": phone})
+    if existing.scalar():
+        raise HTTPException(409, detail="该手机号已注册会员，不能重复入库")
+    target_organization_id = lead.organization_id or organization_id
+    target_matchmaker_id = lead.matchmaker_id or matchmaker_user_id
+    try:
+        result = await db.execute(text("""INSERT INTO users
+            (openid, phone, phone_verified_at, nickname, gender, status, data_complete_rate, register_ip)
+            VALUES (:openid, :phone, UTC_TIMESTAMP(), :nickname, :gender, 1, 0, '127.0.0.1')"""), {
+            "openid": f"lead-convert-{lead_id}", "phone": phone, "nickname": lead.name, "gender": request.gender,
+        })
+        user_id = int(result.lastrowid)
+        await ensure_default_user_role(db, user_id)
+        await db.execute(text("""INSERT INTO matchmaker_member_review (user_id, status, reviewed_by)
+            VALUES (:user_id, 'PENDING', NULL)
+            ON DUPLICATE KEY UPDATE updated_at = UTC_TIMESTAMP()"""), {"user_id": user_id})
+        if target_organization_id is not None or target_matchmaker_id is not None:
+            await db.execute(text("""INSERT INTO resource_assignment
+                (user_id, organization_id, matchmaker_id, source, status, assigned_by)
+                VALUES (:user_id, :organization_id, :matchmaker_id, 'lead_convert', 1, :assigned_by)"""), {
+                "user_id": user_id, "organization_id": target_organization_id,
+                "matchmaker_id": target_matchmaker_id, "assigned_by": account_id,
+            })
+        if request.remark:
+            await db.execute(text("""INSERT INTO matchmaker_admin_member_note (user_id, note, updated_by)
+                VALUES (:user_id, :note, :updated_by)
+                ON DUPLICATE KEY UPDATE note = VALUES(note), updated_by = VALUES(updated_by), updated_at = UTC_TIMESTAMP()"""),
+                {"user_id": user_id, "note": request.remark, "updated_by": account_id})
+        await db.execute(text("""UPDATE customer_lead
+            SET status = 'CONVERTED', converted_user_id = :user_id, updated_at = UTC_TIMESTAMP()
+            WHERE id = :lead_id AND converted_user_id IS NULL"""), {"user_id": user_id, "lead_id": lead_id})
+        await db.execute(text("""INSERT INTO business_audit_log
+            (actor_user_id, action, resource_type, resource_id, reason)
+            VALUES (:actor, 'customer_lead.convert', 'customer_lead', :id, :reason)"""),
+            {"actor": account_id, "id": lead_id, "reason": f"一键入库生成用户 {user_id}"})
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, detail="客源入库失败：手机号或账号已存在") from exc
+    return await get_lead(db, lead_id, REDACTION_LEVEL_STANDARD), user_id, False
 
 
 async def _raw_contact(db: AsyncSession, lead_id: int, column: str) -> str | None:

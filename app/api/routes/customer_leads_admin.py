@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import CurrentMatchmakerAdmin, declare_permission, get_current_matchmaker_admin
 from app.core.sensitive_fields import redaction_level_from_permissions
 from app.db.session import get_db
-from app.schemas.customer_lead_admin import CustomerLead, CustomerLeadAbandonment, CustomerLeadAbandonRequest, CustomerLeadBatchImportRequest, CustomerLeadAssignment, CustomerLeadCreate, CustomerLeadBatchImportResult, CustomerLeadFollowUp, CustomerLeadFollowUpCreate, CustomerLeadImportSummary, CustomerLeadOptions, CustomerLeadPage, CustomerLeadRestoreRequest, CustomerLeadStatistics, CustomerLeadUpdate
-from app.services.customer_lead_admin import abandon_lead, add_follow_up, assign_lead, batch_import_leads, build_import_template, create_lead, get_lead, import_leads_file, lead_options, lead_statistics, list_abandonments, list_follow_ups, list_leads, restore_lead, update_lead
+from app.schemas.customer_lead_admin import CustomerLead, CustomerLeadAbandonment, CustomerLeadAbandonRequest, CustomerLeadBatchImportRequest, CustomerLeadAssignment, CustomerLeadConvertRequest, CustomerLeadConvertResult, CustomerLeadCreate, CustomerLeadBatchImportResult, CustomerLeadFollowUp, CustomerLeadFollowUpCreate, CustomerLeadImportSummary, CustomerLeadOptions, CustomerLeadPage, CustomerLeadRestoreRequest, CustomerLeadStatistics, CustomerLeadUpdate
+from app.services.customer_lead_admin import abandon_lead, add_follow_up, assign_lead, batch_import_leads, build_import_template, convert_lead, create_lead, get_lead, import_leads_file, lead_options, lead_statistics, list_abandonments, list_follow_ups, list_leads, restore_lead, update_lead
 
 router = APIRouter(prefix="/admin/customer-leads")
 
@@ -94,6 +94,26 @@ async def lead_import(
         default_tags=tags,
         dup_mode=dup_mode,
     )
+
+
+@declare_permission("customer_lead.manage")
+@router.post("/{lead_id}/convert", response_model=CustomerLeadConvertResult, summary="客源线索一键入库")
+async def lead_convert(
+    lead_id: int = Path(..., ge=1),
+    body: CustomerLeadConvertRequest = ...,
+    current: CurrentMatchmakerAdmin = Depends(get_current_matchmaker_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CustomerLeadConvertResult:
+    current.require("customer_lead.manage")
+    lead, user_id, replayed = await convert_lead(
+        db,
+        current.account.id,
+        current.account.organization_id,
+        current.account.matchmaker_user_id,
+        lead_id,
+        body,
+    )
+    return CustomerLeadConvertResult(lead=lead, user_id=user_id, replayed=replayed)
 
 
 @declare_permission("customer_lead.manage")
