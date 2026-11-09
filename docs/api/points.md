@@ -6,7 +6,7 @@
 |---|---|---|
 | GET | `/api/v1/users/me/points` | 返回 `balance`、`total_earned`、`total_spent` |
 | GET | `/api/v1/users/me/points/ledger?page=1&page_size=20` | 查询积分流水 |
-| POST | `/api/v1/users/me/checkin` | 每日签到 5 分，重复签到幂等 |
+| POST | `/api/v1/users/me/checkin` | 每日签到默认 5 分，同一天重复签到仅发放一次 |
 | GET | `/api/v1/users/me/tasks` | 查询资料完成、实名认证任务 |
 | POST | `/api/v1/users/me/tasks/{task_code}/claim` | 领取已完成任务奖励 |
 | GET | `/api/v1/users/me/invites?page=1&page_size=20` | 查询本人邀请记录 |

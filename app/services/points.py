@@ -45,14 +45,16 @@ async def ledger(db: AsyncSession, user_id: int, page: int, page_size: int) -> P
 
 async def checkin(db: AsyncSession, user_id: int) -> CheckinResponse:
     today = date.today()
-    async with db.begin():
-        exists = (await db.execute(text("SELECT id,points FROM user_checkin WHERE user_id=:id AND checkin_date=:day FOR UPDATE"), {"id": user_id, "day": today})).mappings().first()
-        if exists:
-            balance = await _balance(db, user_id)
-            return CheckinResponse(checked_in=True, points=int(exists["points"] or 0), balance=balance, checkin_date=today.isoformat())
+    # The authenticated request shares this session and has already started a transaction.
+    exists = (await db.execute(text("SELECT id,points FROM user_checkin WHERE user_id=:id AND checkin_date=:day FOR UPDATE"), {"id": user_id, "day": today})).mappings().first()
+    if exists:
+        reward = int(exists["points"] or 0)
+        balance = await _balance(db, user_id)
+    else:
         reward = settings.point_checkin_reward
         balance = await _credit(db, user_id, reward, 1, "每日签到")
         await db.execute(text("INSERT INTO user_checkin (user_id,checkin_date,points) VALUES (:id,:day,:points)"), {"id": user_id, "day": today, "points": reward})
+    await db.commit()
     return CheckinResponse(checked_in=True, points=reward, balance=balance, checkin_date=today.isoformat())
 
 

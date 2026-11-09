@@ -39,6 +39,7 @@ Content-Type: application/json
 | `marriage_statuses` | array | 婚姻选项，每项含 `value`、`label` |
 | `education_levels` | array | 学历选项，每项含 `value`、`label` |
 | `cities` | array[string] | 固定城市展示名称 |
+| `mbti_types` | array | 16 种 MBTI 选项，每项含类型 `value` 和名称 `label` |
 
 响应：
 
@@ -47,7 +48,8 @@ Content-Type: application/json
   "genders":[{"value":1,"label":"男"},{"value":2,"label":"女"}],
   "marriage_statuses":[{"value":1,"label":"未婚"},{"value":2,"label":"离异"},{"value":3,"label":"丧偶"}],
   "education_levels":[{"value":1,"label":"博士"},{"value":3,"label":"本科"}],
-  "cities":["北京","上海","杭州"]
+  "cities":["北京","上海","杭州"],
+  "mbti_types":[{"value":"INTJ","label":"建筑师"},{"value":"ENFP","label":"竞选者"}]
 }
 ```
 
@@ -105,6 +107,7 @@ Content-Type: application/json
 | `city_code` | string | 否 | 最长 32 字符 | 目标居住市编码 |
 | `district_code` | string | 否 | 最长 32 字符 | 目标居住区编码 |
 | `marriage_status` | integer | 否 | `1`、`2`、`3` | 婚姻状态 |
+| `mbti` | array[string] | 否 | 最多 16 项，值取自 `mbti_types` | 重复传参可匹配任一所选类型 |
 | `education_min` | integer | 否 | 1~8 | 学历下限 |
 | `height_min`/`height_max` | integer | 否 | 100~250，下限不能大于上限 | 身高区间 |
 | `income_min`/`income_max` | number | 否 | 0~1,000,000，下限不能大于上限 | 收入区间 |
@@ -115,7 +118,7 @@ Content-Type: application/json
 请求示例：
 
 ```text
-GET /api/v1/discovery/recommendations?age_min=25&age_max=35&city_code=310100&page=1&page_size=20
+GET /api/v1/discovery/recommendations?age_min=25&age_max=35&city_code=310100&mbti=INTJ&mbti=ENFP&page=1&page_size=20
 ```
 
 成功返回分页结构。没有候选时：
