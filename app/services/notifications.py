@@ -18,7 +18,7 @@ _PREFERENCE_BY_EVENT = {
     "follow": "notify_follow",
     "match": "notify_match",
     "match_application": "notify_apply",
-    "match_application_accepted": "notify_apply",
+    "match_application_accepted": "notify_match",
     "match_application_rejected": "notify_apply",
     "apply": "notify_apply",
     "message": "notify_message",

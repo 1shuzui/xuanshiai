@@ -381,8 +381,8 @@ Authorization: Bearer <access_token>
 | `notify_comment` | boolean/null | 否 | `true` | 布尔值 | 评论通知开关 |
 | `notify_follow` | boolean/null | 否 | `true` | 布尔值 | 关注通知开关 |
 | `notify_message` | boolean/null | 否 | `true` | 布尔值 | 新消息通知开关 |
-| `notify_match` | boolean/null | 否 | `true` | 布尔值 | 匹配通知开关 |
-| `notify_apply` | boolean/null | 否 | `true` | 布尔值 | 认识申请通知开关 |
+| `notify_match` | boolean/null | 否 | `true` | 布尔值 | 匹配通知开关，包含认识申请获同意 |
+| `notify_apply` | boolean/null | 否 | `true` | 布尔值 | 认识申请通知开关，包含新申请与申请被拒绝 |
 | `notify_system` | boolean/null | 否 | `true` | 布尔值 | 系统通知开关 |
 | `notify_activity` | boolean/null | 否 | `true` | 布尔值 | 动态活动通知开关 |
 

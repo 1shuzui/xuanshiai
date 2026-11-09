@@ -124,6 +124,26 @@ async def test_notification_events_honor_self_preference_and_block_suppression()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "preference"),
+    [
+        ("match_application", "notify_apply"),
+        ("match_application_accepted", "notify_match"),
+        ("match_application_rejected", "notify_apply"),
+    ],
+)
+async def test_application_notification_uses_matching_preference(event: str, preference: str) -> None:
+    db = NotificationSession(preference_enabled=False)
+
+    assert not await notification_service.emit_notification(
+        db, recipient_user_id=8, actor_user_id=7, event_type=event,
+        title="认识申请", content="认识申请状态更新",
+    )
+    assert any(f"SELECT {preference} FROM user_privacy" in sql for sql in db.statements)
+    assert not any("INSERT INTO user_notification" in sql for sql in db.statements)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("event_type", ["report_result", "appeal_result"])
 async def test_governance_notification_bypasses_system_notification_preference(event_type: str) -> None:
     db = NotificationSession(preference_enabled=False)

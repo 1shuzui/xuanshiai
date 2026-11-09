@@ -41,6 +41,14 @@ from app.services.profile import _calculate_age, _json_dict, _json_list, get_pro
 logger = logging.getLogger(__name__)
 
 
+MBTI_TYPE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("INTJ", "建筑师"), ("INTP", "逻辑学家"), ("ENTJ", "指挥官"), ("ENTP", "辩论家"),
+    ("INFJ", "提倡者"), ("INFP", "调停者"), ("ENFJ", "主人公"), ("ENFP", "竞选者"),
+    ("ISTJ", "物流师"), ("ISFJ", "守卫者"), ("ESTJ", "总经理"), ("ESFJ", "执政官"),
+    ("ISTP", "鉴赏家"), ("ISFP", "探险家"), ("ESTP", "企业家"), ("ESFP", "表演者"),
+)
+
+
 CARD_SELECT = """
     SELECT u.id AS user_id, u.nickname, u.avatar, u.gender, u.birthday, u.is_married,
            u.is_single_pledge, p.height, p.education_level, p.occupation, p.income,
@@ -230,6 +238,14 @@ def _filter_sql(filters: DiscoveryFilters, params: dict[str, Any]) -> list[str]:
     if filters.marriage_status:
         clauses.append("u.is_married = :filter_marriage")
         params["filter_marriage"] = filters.marriage_status
+    if filters.mbti:
+        # 多型 IN 查询；占位符逐个生成，禁止把用户输入拼进 SQL（3.1）。
+        placeholders = []
+        for index, value in enumerate(filters.mbti):
+            key = f"filter_mbti_{index}"
+            placeholders.append(f":{key}")
+            params[key] = value
+        clauses.append(f"p.mbti IN ({', '.join(placeholders)})")
     if filters.education_min:
         clauses.append("p.education_level >= :filter_education")
         params["filter_education"] = filters.education_min
@@ -368,6 +384,7 @@ async def get_filter_options() -> FilterOptionsResponse:
         marriage_statuses=[{"value": 1, "label": "未婚"}, {"value": 2, "label": "离异"}, {"value": 3, "label": "丧偶"}],
         education_levels=[{"value": 1, "label": "博士"}, {"value": 2, "label": "硕士"}, {"value": 3, "label": "本科"}, {"value": 4, "label": "大专"}, {"value": 5, "label": "高中"}],
         cities=sorted(TAG_OPTIONS_BY_CATEGORY["city"]),
+        mbti_types=[{"value": code, "label": label} for code, label in MBTI_TYPE_OPTIONS],
     )
 
 

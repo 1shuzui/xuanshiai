@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.schemas.auth import ProfileResponse
+from app.schemas.auth import MbtiType, ProfileResponse
 
 
 class DiscoveryFilters(BaseModel):
@@ -18,6 +18,7 @@ class DiscoveryFilters(BaseModel):
     city_code: str | None = Field(default=None, max_length=32)
     district_code: str | None = Field(default=None, max_length=32)
     marriage_status: Literal[1, 2, 3] | None = None
+    mbti: list[MbtiType] | None = Field(default=None, max_length=16)
     education_min: int | None = Field(default=None, ge=1, le=8)
     height_min: int | None = Field(default=None, ge=100, le=250)
     height_max: int | None = Field(default=None, ge=100, le=250)
@@ -26,6 +27,14 @@ class DiscoveryFilters(BaseModel):
     pure_free: bool = False
     page: int = Field(default=1, ge=1, le=1000)
     page_size: int = Field(default=20, ge=1, le=20)
+
+    @field_validator("gender", "marriage_status", mode="before")
+    @classmethod
+    def parse_numeric_filter(cls, value: int | str | None) -> int | str | None:
+        # Query parameters arrive as strings. The Literal still enforces each field's range.
+        if isinstance(value, str) and value in {"1", "2", "3"}:
+            return int(value)
+        return value
 
     @model_validator(mode="after")
     def validate_ranges(self):
@@ -96,6 +105,7 @@ class FilterOptionsResponse(BaseModel):
     marriage_statuses: list[dict[str, int | str]]
     education_levels: list[dict[str, int | str]]
     cities: list[str]
+    mbti_types: list[dict[str, str]]
 
 
 class SavedFilterResponse(BaseModel):
